@@ -1,7 +1,6 @@
 import AudioBtn from "@/components/AudioBtn";
 import BottomControl from "@/components/BottomControl";
 import SearchBar from "@/components/SearchBar";
-import { quranAudioList } from "@/constant/quranAudioList";
 import { useAudioStore } from "@/store/audioStore";
 import { useThemeStore } from "@/store/themeStore";
 import { themeColors } from "@/style/theme";
@@ -32,20 +31,69 @@ const FovoriteScreen = () => {
     isFavorite,
     setAudioItem,
     setCurrentAudioUrl,
+    // 🔄 Caching functions
+    initializeCache,
+    getCachedAudioUrl,
+    cacheAudio,
+    isAudioCached,
   } = useAudioStore();
 
   const router = useRouter();
 
-  // Load favorites from AsyncStorage
+  // Load favorites from AsyncStorage and initialize cache
   useEffect(() => {
     loadFavorites();
+    initializeCache(); // 🎯 Initialize caching system
   }, []);
 
-  // Handle play — navigate to play screen
-  const handlePlay = (item: any) => {
+  // Filter favorites based on search
+  const filteredFavorites = favorites.filter((item) =>
+    item.title.toLowerCase().includes(search.toLowerCase())
+  );
+
+  /**
+   * 🎯 Handles audio playback with caching integration
+   */
+  const handlePlay = async (item: any) => {
     setAudioItem(item);
-    setCurrentAudioUrl(item.url);
-    setShouldAutoPlay(true);
+
+    try {
+      // 🎯 Get cached URL (returns remote URL if not cached)
+      const cachedUrl = await getCachedAudioUrl(item.id, item.url);
+      console.log(
+        `🎯 Using ${cachedUrl === item.url ? "REMOTE" : "CACHED"} URL for: ${item.title}`
+      );
+
+      if (cachedUrl !== audioItem?.url) {
+        setCurrentAudioUrl(cachedUrl);
+        setShouldAutoPlay(true);
+
+        // 🎯 Cache audio in background if not already cached
+        const isCached = await isAudioCached(item.id);
+        if (!isCached) {
+          console.log(
+            `📥 Starting background cache for: ${item.title}`
+          );
+          cacheAudio(item.id, item.url).then((success) => {
+            if (success) {
+              console.log(`✅ Successfully cached: ${item.title}`);
+            } else {
+              console.log(`❌ Failed to cache: ${item.title}`);
+            }
+          });
+        }
+      } else if (!isPlaying) {
+        setShouldAutoPlay(true);
+      }
+    } catch (error) {
+      console.error(
+        `❌ Error handling audio playback for ${item.id}:`,
+        error
+      );
+      // 🎯 Fallback to remote URL on error
+      setCurrentAudioUrl(item.url);
+      setShouldAutoPlay(true);
+    }
   };
 
   const handlePausePlay = async () => {
@@ -67,18 +115,23 @@ const FovoriteScreen = () => {
     }
   };
 
+  /**
+   * ⏭️ Handles next track using favorites array with caching
+   */
   const handleNext = async () => {
-    const currentIndex = quranAudioList.findIndex(
+    // Use favorites array instead of quranAudioList
+    const currentIndex = favorites.findIndex(
       (item) => item.id === audioItem?.id
     );
-    if (currentIndex === -1) return;
+
+    if (currentIndex === -1) {
+      console.log("❌ Current audio not found in favorites");
+      return;
+    }
 
     const nextIndex =
-      currentIndex === quranAudioList.length - 1
-        ? 0
-        : currentIndex + 1;
-
-    const nextAudio = quranAudioList[nextIndex];
+      currentIndex === favorites.length - 1 ? 0 : currentIndex + 1;
+    const nextAudio = favorites[nextIndex];
 
     if (player && isPlaying) {
       await player.pause();
@@ -87,35 +140,120 @@ const FovoriteScreen = () => {
     }
 
     setAudioItem(nextAudio);
-    setCurrentAudioUrl(nextAudio.url);
-    setShouldAutoPlay(true);
+
+    try {
+      // 🎯 Get cached URL for next audio
+      const nextAudioUri = await getCachedAudioUrl(
+        nextAudio.id,
+        nextAudio.url
+      );
+      setCurrentAudioUrl(nextAudioUri);
+      setShouldAutoPlay(true);
+
+      console.log(
+        `🎯 Now playing next favorite: ${nextAudio.title} (${nextAudioUri === nextAudio.url ? "REMOTE" : "CACHED"})`
+      );
+    } catch (error) {
+      console.error("❌ Error switching to next favorite:", error);
+      // Fallback to remote URL
+      setCurrentAudioUrl(nextAudio.url);
+      setShouldAutoPlay(true);
+    }
   };
 
+  /**
+   * ⏮️ Handles previous track using favorites array with caching
+   */
   const handlePrevious = async () => {
-    const currentIndex = quranAudioList.findIndex(
+    // Use favorites array instead of quranAudioList
+    const currentIndex = favorites.findIndex(
       (item) => item.id === audioItem?.id
     );
-    if (currentIndex === -1) return;
+
+    if (currentIndex === -1) {
+      console.log("❌ Current audio not found in favorites");
+      return;
+    }
 
     const prevIndex =
-      currentIndex === 0
-        ? quranAudioList.length - 1
-        : currentIndex - 1;
+      currentIndex === 0 ? favorites.length - 1 : currentIndex - 1;
+    const prevAudio = favorites[prevIndex];
 
-    const prevAudio = quranAudioList[prevIndex];
-
-    // stop old player
     if (player && isPlaying) {
       await player.pause();
       await player.seekTo(0);
       setIsPlaying(false);
     }
 
-    // update new audio info
     setAudioItem(prevAudio);
-    setCurrentAudioUrl(prevAudio.url);
-    setShouldAutoPlay(true);
+
+    try {
+      // 🎯 Get cached URL for previous audio
+      const prevAudioUri = await getCachedAudioUrl(
+        prevAudio.id,
+        prevAudio.url
+      );
+      setCurrentAudioUrl(prevAudioUri);
+      setShouldAutoPlay(true);
+
+      console.log(
+        `🎯 Now playing previous favorite: ${prevAudio.title} (${prevAudioUri === prevAudio.url ? "REMOTE" : "CACHED"})`
+      );
+    } catch (error) {
+      console.error(
+        "❌ Error switching to previous favorite:",
+        error
+      );
+      // Fallback to remote URL
+      setCurrentAudioUrl(prevAudio.url);
+      setShouldAutoPlay(true);
+    }
   };
+
+  /**
+   * 🎯 Pre-caches adjacent favorite tracks for smoother navigation
+   */
+  const preCacheAdjacentFavorites = () => {
+    if (!audioItem?.id || favorites.length === 0) return;
+
+    const currentIndex = favorites.findIndex(
+      (item) => item.id === audioItem.id
+    );
+    if (currentIndex === -1) return;
+
+    const nextIndex = (currentIndex + 1) % favorites.length;
+    const prevIndex =
+      (currentIndex - 1 + favorites.length) % favorites.length;
+
+    const nextAudio = favorites[nextIndex];
+    const prevAudio = favorites[prevIndex];
+
+    console.log(
+      `🎯 Pre-caching adjacent favorites: ${prevAudio.title} ← | → ${nextAudio.title}`
+    );
+
+    // 🎯 Cache adjacent favorite tracks in background
+    cacheAudio(nextAudio.id, nextAudio.url).then((success) => {
+      if (success)
+        console.log(
+          `✅ Pre-cached next favorite: ${nextAudio.title}`
+        );
+    });
+
+    cacheAudio(prevAudio.id, prevAudio.url).then((success) => {
+      if (success)
+        console.log(
+          `✅ Pre-cached previous favorite: ${prevAudio.title}`
+        );
+    });
+  };
+
+  // 🎯 Pre-cache adjacent favorites when audio item changes
+  useEffect(() => {
+    if (audioItem?.id && favorites.length > 0) {
+      preCacheAdjacentFavorites();
+    }
+  }, [audioItem?.id, favorites]);
 
   const navigateToPlay = (
     id: string,
@@ -150,17 +288,17 @@ const FovoriteScreen = () => {
               : themeColors.light.primary,
           }}
         >
-          Favorites
+          Favorites ({favorites.length})
         </Text>
         <SearchBar
-          placeholder="Search"
+          placeholder="Search favorites"
           value={search}
           onChangeText={handleSearch}
         />
       </View>
 
       <FlatList
-        data={favorites}
+        data={search.length > 0 ? filteredFavorites : favorites}
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item }) => (
           <AudioBtn
@@ -185,7 +323,14 @@ const FovoriteScreen = () => {
         )}
         ListEmptyComponent={() => (
           <View className="flex-1 justify-center items-center mt-10">
-            <Text className="text-gray-600 text-base">
+            <Text
+              className="text-base"
+              style={{
+                color: isDark
+                  ? themeColors.dark.textLight
+                  : themeColors.light.textLight,
+              }}
+            >
               No favorite audios yet ❤️
             </Text>
           </View>

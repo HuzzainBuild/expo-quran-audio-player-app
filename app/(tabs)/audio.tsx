@@ -14,26 +14,24 @@ import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import { FlatList, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
 const AudioScreen = () => {
   const router = useRouter();
-
   const [search, setSearch] = useState("");
+
   const handleSearch = (text: string) => setSearch(text);
   const filteredAudios = quranAudioList.filter((item) =>
     item.title.toLowerCase().includes(search.toLowerCase())
   );
 
-  const { theme, toggleTheme } = useThemeStore();
-
+  const { theme } = useThemeStore();
   const isDark = theme === "dark";
 
-  // ✅ Zustand global states
   const {
     audioItem,
     currentAudioUrl,
     isPlaying,
     shouldAutoPlay,
-
     setShouldAutoPlay,
     setAudioItem,
     setCurrentAudioUrl,
@@ -46,25 +44,36 @@ const AudioScreen = () => {
     addFavorite,
     removeFavorite,
     isFavorite,
+    // 🔄 Caching functions
+    initializeCache,
+    getCachedAudioUrl,
+    cacheAudio,
+    isAudioCached,
   } = useAudioStore();
 
   const player = useAudioPlayer(currentAudioUrl || "");
   const audioStatus = useAudioPlayerStatus(player);
 
-  const currentTime = audioStatus.currentTime;
-  const duration = audioStatus.duration;
-  const didJustFinish = audioStatus.didJustFinish;
+  const { currentTime, duration, didJustFinish } = audioStatus;
 
+  // ⏳ Setup player, load favorites, and initialize cache
   useEffect(() => {
-    if (player) {
-      setPlayer(player);
-    }
+    if (player) setPlayer(player);
+    loadFavorites();
+    initializeCache(); // 🎯 Initialize caching system
+
+    const setAudioModeSetUp = async () => {
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionModeAndroid: "duckOthers",
+        interruptionMode: "doNotMix",
+      });
+    };
+    setAudioModeSetUp();
   }, [player]);
 
-  useEffect(() => {
-    loadFavorites();
-  }, []);
-
+  // 🕒 Update store with audio progress
   useEffect(() => {
     if (audioStatus?.isLoaded) {
       setCurrentTime(currentTime);
@@ -72,32 +81,34 @@ const AudioScreen = () => {
       setIsPlaying(audioStatus.playing);
       setDidJustFinish(didJustFinish || false);
     }
-  }, [currentTime, duration, didJustFinish]);
+  }, [audioStatus]);
 
+  // ▶️ Auto-play when shouldAutoPlay changes
   useEffect(() => {
-    const setAudioModeSetUp = async () => {
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        shouldPlayInBackground: true,
-        interruptionModeAndroid: "duckOthers",
-        interruptionMode: "mixWithOthers",
-      });
-    };
-    setAudioModeSetUp();
-  }, []);
+    if (currentAudioUrl && shouldAutoPlay) {
+      const playAudio = async () => {
+        try {
+          await player.seekTo(0);
+          await player.play();
+          setIsPlaying(true);
+        } catch (err) {
+          console.error("Error playing audio:", err);
+        } finally {
+          setShouldAutoPlay(false);
+        }
+      };
+      playAudio();
+    }
+  }, [currentAudioUrl, shouldAutoPlay]);
 
+  // ⏭️ Auto-next when current finishes
   useEffect(() => {
-    if (didJustFinish && player) {
+    if (didJustFinish) {
       (async () => {
         try {
-          await player.pause();
-          await player.seekTo(0);
-          setIsPlaying(false);
+          await handleNext(true); // true = triggered automatically
         } catch (error) {
-          console.error(
-            "Error resetting audio after completion:",
-            error
-          );
+          console.error("Error during auto-next:", error);
         }
       })();
     }
@@ -112,25 +123,55 @@ const AudioScreen = () => {
     const newAudio = { url, title, id, reciter };
     setAudioItem(newAudio);
 
-    if (url !== currentAudioUrl) {
-      setCurrentAudioUrl(url);
-      setShouldAutoPlay(true);
-    } else {
-      if (!isPlaying) {
+    try {
+      // 🎯 Get cached URL (returns remote URL if not cached)
+      const audioUri = await getCachedAudioUrl(id, url);
+
+      console.log(
+        `🎯 Audio ${id} - Using URI: ${audioUri === url ? "REMOTE" : "CACHED"}`
+      );
+
+      // 🎯 If URL changes, update and auto-play
+      if (audioUri !== currentAudioUrl) {
+        setCurrentAudioUrl(audioUri);
+        setShouldAutoPlay(true);
+
+        // 🎯 Cache audio in background if not already cached
+        const isCached = await isAudioCached(id);
+        if (!isCached) {
+          console.log(`📥 Starting background cache for: ${title}`);
+          cacheAudio(id, url).then((success) => {
+            if (success) {
+              console.log(`✅ Successfully cached: ${title}`);
+            } else {
+              console.log(`❌ Failed to cache: ${title}`);
+            }
+          });
+        }
+      } else if (!isPlaying) {
+        // 🎯 Resume playback if same URL and not playing
         await player.play();
         setIsPlaying(true);
       }
+    } catch (error) {
+      console.error(
+        `❌ Error handling audio playback for ${id}:`,
+        error
+      );
+      // 🎯 Fallback to remote URL on error
+      setCurrentAudioUrl(url);
+      setShouldAutoPlay(true);
     }
   };
 
+  /**
+   * ⏸️ Handles play/pause toggle
+   */
   const handlePausePlay = async () => {
-    if (!player) {
-      console.error("Player not initialized");
-      return;
-    }
+    if (!player) return console.error("Player not initialized");
 
     try {
-      if (player && isPlaying) {
+      if (isPlaying) {
         await player.pause();
         setIsPlaying(false);
       } else {
@@ -142,7 +183,7 @@ const AudioScreen = () => {
     }
   };
 
-  const handleNext = async () => {
+  const handleNext = async (autoTriggered = false) => {
     const currentIndex = quranAudioList.findIndex(
       (item) => item.id === audioItem?.id
     );
@@ -160,9 +201,22 @@ const AudioScreen = () => {
       setIsPlaying(false);
     }
 
-    setShouldAutoPlay(true);
     setAudioItem(nextAudio);
-    setCurrentAudioUrl(nextAudio.url);
+
+    // 🎯 Get cached URL for next audio
+    const nextAudioUri = await getCachedAudioUrl(
+      nextAudio.id,
+      nextAudio.url
+    );
+    setCurrentAudioUrl(nextAudioUri);
+
+    // 🎯 Pre-cache adjacent tracks in background
+    preCacheAdjacentTracks(nextIndex);
+
+    // If auto-triggered by finish event, start immediately
+    if (autoTriggered) {
+      setShouldAutoPlay(true);
+    }
   };
 
   const handlePrevious = async () => {
@@ -183,34 +237,41 @@ const AudioScreen = () => {
       setIsPlaying(false);
     }
 
-    setShouldAutoPlay(true);
     setAudioItem(prevAudio);
-    setCurrentAudioUrl(prevAudio.url);
+
+    // 🎯 Get cached URL for previous audio
+    const prevAudioUri = await getCachedAudioUrl(
+      prevAudio.id,
+      prevAudio.url
+    );
+    setCurrentAudioUrl(prevAudioUri);
+
+    // 🎯 Pre-cache adjacent tracks in background
+    preCacheAdjacentTracks(prevIndex);
+
+    setShouldAutoPlay(true);
   };
 
-  useEffect(() => {
-    if (currentAudioUrl && shouldAutoPlay) {
-      const playAudio = async () => {
-        try {
-          await player.seekTo(0);
-          await player.play();
-          setIsPlaying(true);
-          console.log("Playing:");
-        } catch (err) {
-          console.error("Error playing audio:", err);
-        } finally {
-          setShouldAutoPlay(false);
-        }
-      };
-      playAudio();
-    }
-  }, [currentAudioUrl]);
+  const preCacheAdjacentTracks = (currentIndex: number) => {
+    const nextIndex = (currentIndex + 1) % quranAudioList.length;
+    const prevIndex =
+      (currentIndex - 1 + quranAudioList.length) %
+      quranAudioList.length;
 
-  useEffect(() => {
-    if (audioItem?.url) {
-      console.log("Global Audio Item Updated:");
-    }
-  }, [audioItem]);
+    const nextAudio = quranAudioList[nextIndex];
+    const prevAudio = quranAudioList[prevIndex];
+
+    // 🎯 Cache adjacent tracks in background
+    cacheAudio(nextAudio.id, nextAudio.url).then((success) => {
+      if (success)
+        console.log(`✅ Pre-cached next: ${nextAudio.title}`);
+    });
+
+    cacheAudio(prevAudio.id, prevAudio.url).then((success) => {
+      if (success)
+        console.log(`✅ Pre-cached previous: ${prevAudio.title}`);
+    });
+  };
 
   const navigateToPlay = (
     id: string,
@@ -257,7 +318,7 @@ const AudioScreen = () => {
 
       <FlatList
         data={search.length > 0 ? filteredAudios : quranAudioList}
-        keyExtractor={(item) => item.title}
+        keyExtractor={(item) => item.id}
         ItemSeparatorComponent={() => (
           <View
             style={{
@@ -278,13 +339,12 @@ const AudioScreen = () => {
               handlePress(item.url, item.title, item.id, item.reciter)
             }
             isFav={isFavorite(item.id)}
-            onToggleFavorite={() => {
-              if (isFavorite(item.id)) {
-                removeFavorite(item.id);
-              } else {
-                addFavorite(item);
-              }
-            }}
+            onToggleFavorite={() =>
+              isFavorite(item.id)
+                ? removeFavorite(item.id)
+                : addFavorite(item)
+            }
+            isCached={false}
           />
         )}
         ListEmptyComponent={() => (
@@ -306,23 +366,21 @@ const AudioScreen = () => {
         className="flex-1 mt-10 w-full min-h-screen"
       />
 
-      {audioItem && audioItem.url && (
+      {audioItem?.url && (
         <BottomControl
           title={audioItem.title}
           isPlaying={isPlaying}
           onPressPlayPauseBtn={handlePausePlay}
-          onPressNextBtn={handleNext}
+          onPressNextBtn={() => handleNext(false)}
           onPressPrevBtn={handlePrevious}
-          onNavigate={() => {
+          onNavigate={() =>
             navigateToPlay(
               audioItem.id,
               audioItem.title,
               audioItem.url,
-              audioItem.reciter
-                ? audioItem.reciter
-                : "Hafiz Yahya Ibrahim Muhammad"
-            );
-          }}
+              audioItem.reciter || "Hafiz Yahya Ibrahim Muhammad"
+            )
+          }
         />
       )}
     </SafeAreaView>
