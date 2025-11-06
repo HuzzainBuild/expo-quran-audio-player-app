@@ -1,5 +1,6 @@
 import { loveActiveIcon, loveIcon } from "@/constant/icons";
 import { icon } from "@/constant/images";
+import { useAudioStore } from "@/store/audioStore";
 import { useThemeStore } from "@/store/themeStore";
 import { themeColors } from "@/style/theme";
 import React, { useState } from "react";
@@ -30,6 +31,8 @@ const AudioBtn = ({
   onToggleFavorite,
 }: AudioBtnProps) => {
   const [isFavorite, setIsFavorite] = useState(false);
+
+  const { audioItem } = useAudioStore();
 
   const { theme } = useThemeStore();
 
@@ -66,9 +69,14 @@ const AudioBtn = ({
                   style={{
                     fontSize: 16,
                     fontFamily: "NunitoSans-SemiBold",
-                    color: isDark
-                      ? themeColors.dark.text
-                      : themeColors.light.text,
+                    color:
+                      isDark && audioItem?.title === title
+                        ? themeColors.dark.primary
+                        : isDark && audioItem?.title !== title
+                          ? themeColors.dark.text
+                          : !isDark && audioItem?.title === title
+                            ? themeColors.light.primary
+                            : themeColors.light.text,
                   }}
                 >
                   {title}
@@ -97,7 +105,9 @@ const AudioBtn = ({
                   className="w-6 h-5"
                   resizeMode="contain"
                   tintColor={
-                    isDark ? themeColors.dark.textLight : "#82B098"
+                    isDark
+                      ? themeColors.dark.primary
+                      : themeColors.dark.primary
                   }
                 />
               </TouchableOpacity>

@@ -1,4 +1,5 @@
 import { useThemeStore } from "@/store/themeStore";
+import { setAudioModeAsync } from "expo-audio";
 import { useFonts } from "expo-font";
 import { SplashScreen, Stack } from "expo-router";
 import { useEffect } from "react";
@@ -22,6 +23,23 @@ export default function RootLayout() {
     if (error) throw error;
     if (fontsLoaded) SplashScreen.hideAsync();
   }, [fontsLoaded, error]);
+
+  useEffect(() => {
+    const setupAudioMode = async () => {
+      try {
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: true,
+          interruptionModeAndroid: "doNotMix",
+          interruptionMode: "doNotMix",
+        });
+        console.log("🎧 Audio mode set globally");
+      } catch (err) {
+        console.error("Error setting audio mode:", err);
+      }
+    };
+    setupAudioMode();
+  }, []);
 
   return (
     <Stack>

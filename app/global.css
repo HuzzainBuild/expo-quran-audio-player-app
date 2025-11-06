@@ -44,7 +44,8 @@ body {
   /** Warning colors */
   --clr-warning-a0: #a87a2a;
   --clr-warning-a10: #d7ac61;
-  --clr-warning-a20: #ecd7b2;
+  /* --clr-warning-a20: #ecd7b2; */
+  --clr-warning-a20: "#0A84FF";
 
   /** Danger colors */
   --clr-danger-a0: #9c2121;

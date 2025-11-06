@@ -39,8 +39,8 @@ const BottomControl = ({
         paddingHorizontal: 15,
         left: 18,
         backgroundColor: isDark
-          ? themeColors.dark.card
-          : themeColors.light.card,
+          ? themeColors.dark.primary
+          : themeColors.light.primary,
       }}
       onPress={onNavigate}
     >
@@ -57,7 +57,7 @@ const BottomControl = ({
               fontFamily: "NunitoSans-Bold",
               color: isDark
                 ? themeColors.dark.text
-                : themeColors.light.primary,
+                : themeColors.dark.text,
             }}
           >
             {title}
@@ -75,7 +75,7 @@ const BottomControl = ({
               style={{ width: 20, height: 20 }}
               resizeMode="contain"
               tintColor={
-                isDark ? themeColors.dark.textLight : "#82B098"
+                isDark ? themeColors.dark.text : themeColors.dark.text
               }
             />
           </TouchableOpacity>
@@ -84,13 +84,17 @@ const BottomControl = ({
             onPress={onPressPlayPauseBtn}
             style={{
               padding: 15,
+              backgroundColor: "#638f72",
+              borderRadius: "100%",
             }}
           >
             <Image
               source={isPlaying ? pauseIcon : playIcon}
               style={{ width: 20, height: 20 }}
               resizeMode="contain"
-              tintColor={isDark ? themeColors.dark.text : "#0c5b34"}
+              tintColor={
+                isDark ? themeColors.dark.text : themeColors.dark.text
+              }
             />
           </TouchableOpacity>
 
@@ -105,7 +109,7 @@ const BottomControl = ({
               style={{ width: 20, height: 20 }}
               resizeMode="contain"
               tintColor={
-                isDark ? themeColors.dark.textLight : "#82B098"
+                isDark ? themeColors.dark.text : themeColors.dark.text
               }
             />
           </TouchableOpacity>

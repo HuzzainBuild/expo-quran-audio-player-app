@@ -11,7 +11,12 @@ import {
   useAudioPlayerStatus,
 } from "expo-audio";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { FlatList, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -19,10 +24,18 @@ const AudioScreen = () => {
   const router = useRouter();
   const [search, setSearch] = useState("");
 
-  const handleSearch = (text: string) => setSearch(text);
-  const filteredAudios = quranAudioList.filter((item) =>
-    item.title.toLowerCase().includes(search.toLowerCase())
+  const handleSearch = useCallback(
+    (text: string) => setSearch(text),
+    []
   );
+
+  const filteredAudios = useMemo(() => {
+    if (search.length === 0) return quranAudioList;
+    const lowerSearch = search.toLowerCase();
+    return quranAudioList.filter((item) =>
+      item.title.toLowerCase().includes(lowerSearch)
+    );
+  }, [search]);
 
   const { theme } = useThemeStore();
   const isDark = theme === "dark";
@@ -44,36 +57,42 @@ const AudioScreen = () => {
     addFavorite,
     removeFavorite,
     isFavorite,
-    // 🔄 Caching functions
     initializeCache,
     getCachedAudioUrl,
     cacheAudio,
-    isAudioCached,
+    isAudioCachedSync,
+    activeScreen,
+    setActiveScreen,
   } = useAudioStore();
+
+  useEffect(() => {
+    setActiveScreen("audio");
+    return () => setActiveScreen(null);
+  }, []);
 
   const player = useAudioPlayer(currentAudioUrl || "");
   const audioStatus = useAudioPlayerStatus(player);
 
   const { currentTime, duration, didJustFinish } = audioStatus;
 
-  // ⏳ Setup player, load favorites, and initialize cache
   useEffect(() => {
     if (player) setPlayer(player);
-    loadFavorites();
-    initializeCache(); // 🎯 Initialize caching system
+
+    Promise.all([loadFavorites(), initializeCache()]).catch(
+      console.error
+    );
 
     const setAudioModeSetUp = async () => {
       await setAudioModeAsync({
         playsInSilentMode: true,
         shouldPlayInBackground: true,
-        interruptionModeAndroid: "duckOthers",
+        interruptionModeAndroid: "doNotMix",
         interruptionMode: "doNotMix",
       });
     };
     setAudioModeSetUp();
   }, [player]);
 
-  // 🕒 Update store with audio progress
   useEffect(() => {
     if (audioStatus?.isLoaded) {
       setCurrentTime(currentTime);
@@ -81,9 +100,14 @@ const AudioScreen = () => {
       setIsPlaying(audioStatus.playing);
       setDidJustFinish(didJustFinish || false);
     }
-  }, [audioStatus]);
+  }, [
+    audioStatus?.isLoaded,
+    currentTime,
+    duration,
+    audioStatus?.playing,
+    didJustFinish,
+  ]);
 
-  // ▶️ Auto-play when shouldAutoPlay changes
   useEffect(() => {
     if (currentAudioUrl && shouldAutoPlay) {
       const playAudio = async () => {
@@ -101,74 +125,64 @@ const AudioScreen = () => {
     }
   }, [currentAudioUrl, shouldAutoPlay]);
 
-  // ⏭️ Auto-next when current finishes
   useEffect(() => {
-    if (didJustFinish) {
-      (async () => {
-        try {
-          await handleNext(true); // true = triggered automatically
-        } catch (error) {
-          console.error("Error during auto-next:", error);
-        }
-      })();
+    if (didJustFinish && activeScreen === "audio") {
+      player.pause();
+      player.seekTo(0);
+      setIsPlaying(false);
+      handleNext(true);
     }
-  }, [didJustFinish]);
+  }, [didJustFinish, activeScreen]);
 
-  const handlePress = async (
-    url: string,
-    title: string,
-    id: string,
-    reciter: string
-  ) => {
-    const newAudio = { url, title, id, reciter };
-    setAudioItem(newAudio);
+  const handlePress = useCallback(
+    async (
+      url: string,
+      title: string,
+      id: string,
+      reciter: string
+    ) => {
+      const newAudio = { url, title, id, reciter };
+      setAudioItem(newAudio);
 
-    try {
-      // 🎯 Get cached URL (returns remote URL if not cached)
-      const audioUri = await getCachedAudioUrl(id, url);
+      try {
+        const audioUri = await getCachedAudioUrl(id, url);
 
-      console.log(
-        `🎯 Audio ${id} - Using URI: ${audioUri === url ? "REMOTE" : "CACHED"}`
-      );
+        if (audioUri !== currentAudioUrl) {
+          setCurrentAudioUrl(audioUri);
+          setShouldAutoPlay(true);
 
-      // 🎯 If URL changes, update and auto-play
-      if (audioUri !== currentAudioUrl) {
-        setCurrentAudioUrl(audioUri);
+          if (!isAudioCachedSync(id)) {
+            cacheAudio(id, url).catch(console.error);
+          }
+        } else if (!isPlaying) {
+          await player.play();
+          setIsPlaying(true);
+        }
+      } catch (error) {
+        console.error(
+          `❌ Error handling audio playback for ${id}:`,
+          error
+        );
+        setCurrentAudioUrl(url);
         setShouldAutoPlay(true);
-
-        // 🎯 Cache audio in background if not already cached
-        const isCached = await isAudioCached(id);
-        if (!isCached) {
-          console.log(`📥 Starting background cache for: ${title}`);
-          cacheAudio(id, url).then((success) => {
-            if (success) {
-              console.log(`✅ Successfully cached: ${title}`);
-            } else {
-              console.log(`❌ Failed to cache: ${title}`);
-            }
-          });
-        }
-      } else if (!isPlaying) {
-        // 🎯 Resume playback if same URL and not playing
-        await player.play();
-        setIsPlaying(true);
       }
-    } catch (error) {
-      console.error(
-        `❌ Error handling audio playback for ${id}:`,
-        error
-      );
-      // 🎯 Fallback to remote URL on error
-      setCurrentAudioUrl(url);
-      setShouldAutoPlay(true);
-    }
-  };
+    },
+    [
+      currentAudioUrl,
+      isPlaying,
+      player,
+      setAudioItem,
+      setCurrentAudioUrl,
+      setShouldAutoPlay,
+      setIsPlaying,
+      getCachedAudioUrl,
+      cacheAudio,
+      isAudioCachedSync,
+    ]
+  );
 
-  /**
-   * ⏸️ Handles play/pause toggle
-   */
-  const handlePausePlay = async () => {
-    if (!player) return console.error("Player not initialized");
+  const handlePausePlay = useCallback(async () => {
+    if (!player) return;
 
     try {
       if (isPlaying) {
@@ -181,54 +195,77 @@ const AudioScreen = () => {
     } catch (err) {
       console.error("Error toggling playback:", err);
     }
-  };
+  }, [player, isPlaying, setIsPlaying]);
 
-  const handleNext = async (autoTriggered = false) => {
+  const handleNext = useCallback(
+    async (autoTriggered = false) => {
+      const currentIndex = quranAudioList.findIndex(
+        (item) => item.id === audioItem?.id
+      );
+
+      if (
+        currentIndex === -1 ||
+        currentIndex === quranAudioList.length - 1
+      ) {
+        console.log(
+          "Reached the end of the Quran audio list. No next track."
+        );
+        return;
+      }
+
+      const nextIndex = currentIndex + 1;
+      const nextAudio = quranAudioList[nextIndex];
+
+      if (player && isPlaying) {
+        await player.pause();
+        await player.seekTo(0);
+        setIsPlaying(false);
+      }
+
+      setAudioItem(nextAudio);
+
+      try {
+        const nextAudioUri = await getCachedAudioUrl(
+          nextAudio.id,
+          nextAudio.url
+        );
+        setCurrentAudioUrl(nextAudioUri);
+
+        preCacheAdjacentTracks(nextIndex);
+
+        setShouldAutoPlay(true);
+      } catch (error) {
+        console.error("❌ Error switching to next track:", error);
+        setCurrentAudioUrl(nextAudio.url);
+        setShouldAutoPlay(autoTriggered);
+      }
+    },
+    [
+      audioItem,
+      player,
+      isPlaying,
+      setAudioItem,
+      setCurrentAudioUrl,
+      setIsPlaying,
+      setShouldAutoPlay,
+      getCachedAudioUrl,
+      quranAudioList,
+    ]
+  );
+
+  const handlePrevious = useCallback(async () => {
     const currentIndex = quranAudioList.findIndex(
       (item) => item.id === audioItem?.id
     );
-    if (currentIndex === -1) return;
 
-    const nextIndex =
-      currentIndex === quranAudioList.length - 1
-        ? 0
-        : currentIndex + 1;
-    const nextAudio = quranAudioList[nextIndex];
-
-    if (player && isPlaying) {
-      await player.pause();
-      await player.seekTo(0);
-      setIsPlaying(false);
+    if (currentIndex === -1 || currentIndex === 0) {
+      console.log(
+        "Reached the beginning of the Quran audio list. No previous track."
+      );
+      return;
     }
 
-    setAudioItem(nextAudio);
-
-    // 🎯 Get cached URL for next audio
-    const nextAudioUri = await getCachedAudioUrl(
-      nextAudio.id,
-      nextAudio.url
-    );
-    setCurrentAudioUrl(nextAudioUri);
-
-    // 🎯 Pre-cache adjacent tracks in background
-    preCacheAdjacentTracks(nextIndex);
-
-    // If auto-triggered by finish event, start immediately
-    if (autoTriggered) {
-      setShouldAutoPlay(true);
-    }
-  };
-
-  const handlePrevious = async () => {
-    const currentIndex = quranAudioList.findIndex(
-      (item) => item.id === audioItem?.id
-    );
-    if (currentIndex === -1) return;
-
-    const prevIndex =
-      currentIndex === 0
-        ? quranAudioList.length - 1
-        : currentIndex - 1;
+    const prevIndex = currentIndex - 1;
     const prevAudio = quranAudioList[prevIndex];
 
     if (player && isPlaying) {
@@ -239,52 +276,134 @@ const AudioScreen = () => {
 
     setAudioItem(prevAudio);
 
-    // 🎯 Get cached URL for previous audio
-    const prevAudioUri = await getCachedAudioUrl(
-      prevAudio.id,
-      prevAudio.url
-    );
-    setCurrentAudioUrl(prevAudioUri);
+    try {
+      const prevAudioUri = await getCachedAudioUrl(
+        prevAudio.id,
+        prevAudio.url
+      );
+      setCurrentAudioUrl(prevAudioUri);
 
-    // 🎯 Pre-cache adjacent tracks in background
-    preCacheAdjacentTracks(prevIndex);
+      preCacheAdjacentTracks(prevIndex);
 
-    setShouldAutoPlay(true);
-  };
+      setShouldAutoPlay(true);
+    } catch (error) {
+      console.error("❌ Error switching to previous track:", error);
+      setCurrentAudioUrl(prevAudio.url);
+      setShouldAutoPlay(true);
+    }
+  }, [
+    audioItem,
+    player,
+    isPlaying,
+    setAudioItem,
+    setCurrentAudioUrl,
+    setIsPlaying,
+    setShouldAutoPlay,
+    getCachedAudioUrl,
+    quranAudioList,
+  ]);
 
-  const preCacheAdjacentTracks = (currentIndex: number) => {
-    const nextIndex = (currentIndex + 1) % quranAudioList.length;
-    const prevIndex =
-      (currentIndex - 1 + quranAudioList.length) %
-      quranAudioList.length;
+  const preCacheAdjacentTracks = useCallback(
+    (currentIndex: number) => {
+      const nextIndex = (currentIndex + 1) % quranAudioList.length;
+      const prevIndex =
+        (currentIndex - 1 + quranAudioList.length) %
+        quranAudioList.length;
 
-    const nextAudio = quranAudioList[nextIndex];
-    const prevAudio = quranAudioList[prevIndex];
+      const nextAudio = quranAudioList[nextIndex];
+      const prevAudio = quranAudioList[prevIndex];
 
-    // 🎯 Cache adjacent tracks in background
-    cacheAudio(nextAudio.id, nextAudio.url).then((success) => {
-      if (success)
-        console.log(`✅ Pre-cached next: ${nextAudio.title}`);
-    });
+      if (!isAudioCachedSync(nextAudio.id)) {
+        cacheAudio(nextAudio.id, nextAudio.url).catch(console.error);
+      }
 
-    cacheAudio(prevAudio.id, prevAudio.url).then((success) => {
-      if (success)
-        console.log(`✅ Pre-cached previous: ${prevAudio.title}`);
-    });
-  };
+      if (!isAudioCachedSync(prevAudio.id)) {
+        cacheAudio(prevAudio.id, prevAudio.url).catch(console.error);
+      }
+    },
+    [cacheAudio, isAudioCachedSync]
+  );
 
-  const navigateToPlay = (
-    id: string,
-    title: string,
-    url: string,
-    reciter: string
-  ) => {
-    router.push(
-      `/play/${id}?title=${encodeURIComponent(title)}&url=${encodeURIComponent(
-        url
-      )}&reciter=${encodeURIComponent(reciter)}`
-    );
-  };
+  const navigateToPlay = useCallback(
+    (id: string, title: string, url: string, reciter: string) => {
+      router.push(
+        `/play/${id}?title=${encodeURIComponent(title)}&url=${encodeURIComponent(
+          url
+        )}&reciter=${encodeURIComponent(reciter)}&from=${encodeURIComponent("audio")}`
+      );
+    },
+    [router]
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: (typeof quranAudioList)[0] }) => {
+      const itemIsFavorite = isFavorite(item.id);
+      const itemIsCached = isAudioCachedSync(item.id);
+
+      return (
+        <AudioBtn
+          title={item.title}
+          reciter={item.reciter}
+          url={item.url}
+          id={item.id}
+          onPress={() =>
+            handlePress(item.url, item.title, item.id, item.reciter)
+          }
+          isFav={itemIsFavorite}
+          onToggleFavorite={() =>
+            itemIsFavorite
+              ? removeFavorite(item.id)
+              : addFavorite(item)
+          }
+          isCached={itemIsCached}
+        />
+      );
+    },
+    [
+      isFavorite,
+      isAudioCachedSync,
+      handlePress,
+      removeFavorite,
+      addFavorite,
+    ]
+  );
+
+  const keyExtractor = useCallback(
+    (item: (typeof quranAudioList)[0]) => item.id,
+    []
+  );
+
+  const ItemSeparator = useMemo(
+    () => (
+      <View
+        style={{
+          height: 0.8,
+          backgroundColor: isDark
+            ? themeColors.dark.card
+            : themeColors.light.card,
+        }}
+      />
+    ),
+    [isDark]
+  );
+
+  const EmptyComponent = useMemo(
+    () => (
+      <View className="flex-1 justify-center items-center">
+        <Text
+          className="text-base"
+          style={{
+            color: isDark
+              ? themeColors.dark.text
+              : themeColors.light.text,
+          }}
+        >
+          No results found
+        </Text>
+      </View>
+    ),
+    [isDark]
+  );
 
   return (
     <SafeAreaView
@@ -317,53 +436,19 @@ const AudioScreen = () => {
       </View>
 
       <FlatList
-        data={search.length > 0 ? filteredAudios : quranAudioList}
-        keyExtractor={(item) => item.id}
-        ItemSeparatorComponent={() => (
-          <View
-            style={{
-              height: 0.5,
-              backgroundColor: isDark
-                ? themeColors.dark.card
-                : themeColors.light.card,
-            }}
-          />
-        )}
-        renderItem={({ item }) => (
-          <AudioBtn
-            title={item.title}
-            reciter={item.reciter}
-            url={item.url}
-            id={item.id}
-            onPress={() =>
-              handlePress(item.url, item.title, item.id, item.reciter)
-            }
-            isFav={isFavorite(item.id)}
-            onToggleFavorite={() =>
-              isFavorite(item.id)
-                ? removeFavorite(item.id)
-                : addFavorite(item)
-            }
-            isCached={false}
-          />
-        )}
-        ListEmptyComponent={() => (
-          <View className="flex-1 justify-center items-center">
-            <Text
-              className="text-base"
-              style={{
-                color: isDark
-                  ? themeColors.dark.text
-                  : themeColors.light.text,
-              }}
-            >
-              No results found
-            </Text>
-          </View>
-        )}
+        data={filteredAudios}
+        keyExtractor={keyExtractor}
+        ItemSeparatorComponent={() => ItemSeparator}
+        renderItem={renderItem}
+        ListEmptyComponent={EmptyComponent}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 150 }}
         className="flex-1 mt-10 w-full min-h-screen"
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={true}
+        updateCellsBatchingPeriod={50}
       />
 
       {audioItem?.url && (

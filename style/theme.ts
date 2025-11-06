@@ -12,7 +12,7 @@ export const themeColors = {
     text: "#FFFFFF",
     textLight: "#8b8b8b",
     card: "#3f3f3f",
-    primary: "#0A84FF",
+    primary: "#0c5b34",
     border: "#333333",
     quranText: "#95b49f",
   },

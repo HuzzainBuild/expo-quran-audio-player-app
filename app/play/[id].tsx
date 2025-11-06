@@ -18,7 +18,12 @@ import { themeColors } from "@/style/theme";
 import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   Dimensions,
   Image,
@@ -28,11 +33,14 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
 const { width } = Dimensions.get("window");
 
 const PlayScreen = () => {
   const params = useLocalSearchParams();
   const router = useRouter();
+
+  const { from } = params as { from?: string };
 
   const [isLoop, setIsLoop] = useState(false);
 
@@ -56,77 +64,98 @@ const PlayScreen = () => {
     setCurrentAudioUrl,
     setIsPlaying,
     setShouldAutoPlay,
-    // 🔄 Caching functions
     getCachedAudioUrl,
     cacheAudio,
-    isAudioCached,
+    isAudioCachedSync,
     initializeCache,
+    setActiveScreen,
   } = useAudioStore();
 
-  // ✅ Initialize cache system on component mount
   useEffect(() => {
-    initializeCache().then(() => {
-      console.log("🎯 Cache system initialized in play screen");
-    });
+    if (from === "favorites") {
+      setActiveScreen("favorites");
+    } else {
+      setActiveScreen("audio");
+    }
+    return () => setActiveScreen(null);
+  }, [from]);
+
+  const currentTimeDisplay = useMemo(
+    () => formatTime(currentTime),
+    [currentTime]
+  );
+  const durationDisplay = useMemo(
+    () => formatTime(duration),
+    [duration]
+  );
+
+  const isFavoriteAudio = useMemo(
+    () => audioItem?.id && isFavorite(audioItem.id),
+    [audioItem?.id, isFavorite]
+  );
+
+  useEffect(() => {
+    initializeCache();
   }, []);
 
-  // ✅ Load audio if opened via deep link with caching
-  useEffect(() => {
-    const loadAudioWithCaching = async () => {
-      if (params.id && typeof params.id === "string") {
-        const selectedAudio = quranAudioList.find(
-          (item) => item.id === params.id
-        );
+  const loadAudioWithCaching = useCallback(
+    async (audioId: string) => {
+      const selectedAudio = quranAudioList.find(
+        (item) => item.id === audioId
+      );
 
-        if (!selectedAudio) {
-          console.error("❌ Audio not found for ID:", params.id);
-          return;
-        }
-
-        // ✅ Only reload if the selected audio is different
-        if (selectedAudio && selectedAudio.id !== audioItem?.id) {
-          console.log(`🎯 Loading audio: ${selectedAudio.title}`);
-          setAudioItem(selectedAudio);
-
-          try {
-            // 🎯 Get cached URL or remote URL
-            const cachedUrl = await getCachedAudioUrl(
-              selectedAudio.id,
-              selectedAudio.url
-            );
-            console.log(
-              `🎯 Using ${cachedUrl === selectedAudio.url ? "REMOTE" : "CACHED"} URL for playback`
-            );
-
-            setCurrentAudioUrl(cachedUrl);
-            setShouldAutoPlay(true);
-
-            // 🎯 Cache in background if not already cached
-            await cacheAudioInBackground(
-              selectedAudio.id,
-              selectedAudio.url
-            );
-          } catch (error) {
-            console.error("❌ Error getting cached URL:", error);
-            // 🎯 Fallback to remote URL
-            setCurrentAudioUrl(selectedAudio.url);
-            setShouldAutoPlay(true);
-          }
-        }
+      if (!selectedAudio) {
+        console.error("❌ Audio not found for ID:", audioId);
+        return;
       }
-    };
 
-    loadAudioWithCaching();
+      if (selectedAudio.id === audioItem?.id) return;
+
+      console.log(`🎯 Loading audio: ${selectedAudio.title}`);
+      setAudioItem(selectedAudio);
+
+      try {
+        const cachedUrl = await getCachedAudioUrl(
+          selectedAudio.id,
+          selectedAudio.url
+        );
+        setCurrentAudioUrl(cachedUrl);
+        setShouldAutoPlay(true);
+
+        if (!isAudioCachedSync(selectedAudio.id)) {
+          cacheAudio(selectedAudio.id, selectedAudio.url).catch(
+            console.error
+          );
+        }
+      } catch (error) {
+        console.error("❌ Error getting cached URL:", error);
+        setCurrentAudioUrl(selectedAudio.url);
+        setShouldAutoPlay(true);
+      }
+    },
+    [
+      audioItem?.id,
+      setAudioItem,
+      setCurrentAudioUrl,
+      setShouldAutoPlay,
+      getCachedAudioUrl,
+      cacheAudio,
+      isAudioCachedSync,
+    ]
+  );
+
+  useEffect(() => {
+    if (params.id && typeof params.id === "string") {
+      loadAudioWithCaching(params.id);
+    }
   }, [params.id]);
 
-  // ✅ Update cache status when audio item changes and pre-cache adjacent tracks
   useEffect(() => {
     if (audioItem?.id) {
       preCacheAdjacentTracks();
     }
   }, [audioItem?.id]);
 
-  // ✅ Reset player after finish (only if not looping)
   useEffect(() => {
     if (didJustFinish && player && !isLoop) {
       (async () => {
@@ -134,57 +163,18 @@ const PlayScreen = () => {
           await player.pause();
           await player.seekTo(0);
           setIsPlaying(false);
-          console.log("⏹️ Player reset after finish");
         } catch (error) {
           console.error("❌ Error resetting player:", error);
         }
       })();
     }
-  }, [didJustFinish, isLoop]);
+  }, [didJustFinish, isLoop, player, setIsPlaying]);
 
-  // ✅ Load favorites on mount
   useEffect(() => {
     loadFavorites();
   }, []);
 
-  /**
-   * 🎯 Caches audio in background if not already cached
-   */
-  const cacheAudioInBackground = async (
-    audioId: string,
-    remoteUrl: string
-  ) => {
-    try {
-      const alreadyCached = await isAudioCached(audioId);
-      if (!alreadyCached) {
-        console.log(`📥 Starting background caching for: ${audioId}`);
-
-        cacheAudio(audioId, remoteUrl)
-          .then((success) => {
-            if (success) {
-              console.log(`✅ Background cache complete: ${audioId}`);
-            } else {
-              console.log(`❌ Background cache failed: ${audioId}`);
-            }
-          })
-          .catch((error) => {
-            console.error(
-              `❌ Background cache error for ${audioId}:`,
-              error
-            );
-          });
-      } else {
-        console.log(`⏭️ Audio already cached, skipping: ${audioId}`);
-      }
-    } catch (error) {
-      console.error("❌ Error in background caching:", error);
-    }
-  };
-
-  /**
-   * 🎯 Pre-caches adjacent tracks for smoother navigation
-   */
-  const preCacheAdjacentTracks = () => {
+  const preCacheAdjacentTracks = useCallback(() => {
     if (!audioItem?.id) return;
 
     const currentIndex = quranAudioList.findIndex(
@@ -200,21 +190,16 @@ const PlayScreen = () => {
     const nextAudio = quranAudioList[nextIndex];
     const prevAudio = quranAudioList[prevIndex];
 
-    console.log(
-      `🎯 Pre-caching adjacent tracks: ${prevAudio.title} ← | → ${nextAudio.title}`
-    );
+    if (!isAudioCachedSync(nextAudio.id)) {
+      cacheAudio(nextAudio.id, nextAudio.url).catch(console.error);
+    }
 
-    // 🎯 Cache adjacent tracks in background
-    cacheAudioInBackground(nextAudio.id, nextAudio.url);
-    cacheAudioInBackground(prevAudio.id, prevAudio.url);
-  };
+    if (!isAudioCachedSync(prevAudio.id)) {
+      cacheAudio(prevAudio.id, prevAudio.url).catch(console.error);
+    }
+  }, [audioItem?.id, cacheAudio, isAudioCachedSync]);
 
-  const currentTimeDisplay = formatTime(currentTime);
-  const durationDisplay = formatTime(duration);
-
-  // ---- HANDLERS ----
-
-  const handlePausePlay = async () => {
+  const handlePausePlay = useCallback(async () => {
     if (!player) return;
     try {
       if (isPlaying) {
@@ -227,17 +212,34 @@ const PlayScreen = () => {
     } catch (err) {
       console.error("Error toggling playback:", err);
     }
-  };
+  }, [player, isPlaying, setIsPlaying]);
 
-  const handlePrevious = async () => {
+  const handlePrevious = useCallback(async () => {
     if (!audioItem) return;
-    const currentIndex = quranAudioList.findIndex(
+
+    const { favorites } = useAudioStore.getState();
+
+    const sortedFavorites = [...favorites].sort((a, b) =>
+      a.title.localeCompare(b.title, undefined, {
+        sensitivity: "base",
+      })
+    );
+    const list =
+      from === "favorites" ? sortedFavorites : quranAudioList;
+
+    if (!list || list.length === 0) return;
+
+    const currentIndex = list.findIndex(
       (item) => item.id === audioItem.id
     );
-    const prevIndex =
-      (currentIndex - 1 + quranAudioList.length) %
-      quranAudioList.length;
-    const prevAudio = quranAudioList[prevIndex];
+    if (currentIndex <= 0) {
+      console.log(
+        "Reached the beginning of the list. No previous track."
+      );
+      return;
+    }
+
+    const prevAudio = list[currentIndex - 1];
 
     if (player) {
       await player.pause();
@@ -248,7 +250,6 @@ const PlayScreen = () => {
     setAudioItem(prevAudio);
 
     try {
-      // 🎯 Get cached URL for previous audio
       const prevAudioUri = await getCachedAudioUrl(
         prevAudio.id,
         prevAudio.url
@@ -256,32 +257,59 @@ const PlayScreen = () => {
       setCurrentAudioUrl(prevAudioUri);
       setShouldAutoPlay(true);
 
-      console.log(
-        `🎯 Now playing: ${prevAudio.title} (${prevAudioUri === prevAudio.url ? "REMOTE" : "CACHED"})`
-      );
-
       router.setParams({
         id: prevAudio.id,
         title: prevAudio.title,
         url: prevAudio.url,
         reciter: prevAudio.reciter,
+        from,
       });
     } catch (error) {
       console.error("❌ Error switching to previous track:", error);
-      // Fallback to remote URL
       setCurrentAudioUrl(prevAudio.url);
       setShouldAutoPlay(true);
     }
-  };
+  }, [
+    from,
+    audioItem,
+    player,
+    setIsPlaying,
+    setAudioItem,
+    getCachedAudioUrl,
+    setCurrentAudioUrl,
+    setShouldAutoPlay,
+    router,
+  ]);
 
-  const handleNext = async () => {
+  const handleNext = useCallback(async () => {
     if (!audioItem) return;
-    const currentIndex = quranAudioList.findIndex(
+
+    const { favorites } = useAudioStore.getState(); // get latest favorites from store
+
+    const sortedFavorites = [...favorites].sort((a, b) =>
+      a.title.localeCompare(b.title, undefined, {
+        sensitivity: "base",
+      })
+    );
+
+    // Determine which list to use
+    const list =
+      from === "favorites" ? sortedFavorites : quranAudioList;
+    if (!list || list.length === 0) return;
+
+    // Find current index in the selected list
+    const currentIndex = list.findIndex(
       (item) => item.id === audioItem.id
     );
-    const nextIndex = (currentIndex + 1) % quranAudioList.length;
-    const nextAudio = quranAudioList[nextIndex];
+    if (currentIndex === -1 || currentIndex === list.length - 1) {
+      console.log("Reached the end of the list. No next track.");
+      return;
+    }
 
+    // Get next track
+    const nextAudio = list[currentIndex + 1];
+
+    // Reset player before switching
     if (player) {
       await player.pause();
       await player.seekTo(0);
@@ -291,7 +319,6 @@ const PlayScreen = () => {
     setAudioItem(nextAudio);
 
     try {
-      // 🎯 Get cached URL for next audio
       const nextAudioUri = await getCachedAudioUrl(
         nextAudio.id,
         nextAudio.url
@@ -299,54 +326,65 @@ const PlayScreen = () => {
       setCurrentAudioUrl(nextAudioUri);
       setShouldAutoPlay(true);
 
-      console.log(
-        `🎯 Now playing: ${nextAudio.title} (${nextAudioUri === nextAudio.url ? "REMOTE" : "CACHED"})`
-      );
-
       router.setParams({
         id: nextAudio.id,
         title: nextAudio.title,
         url: nextAudio.url,
         reciter: nextAudio.reciter,
+        from,
       });
     } catch (error) {
       console.error("❌ Error switching to next track:", error);
-      // Fallback to remote URL
       setCurrentAudioUrl(nextAudio.url);
       setShouldAutoPlay(true);
     }
-  };
+  }, [
+    from,
+    audioItem,
+    player,
+    setIsPlaying,
+    setAudioItem,
+    getCachedAudioUrl,
+    setCurrentAudioUrl,
+    setShouldAutoPlay,
+    router,
+  ]);
 
-  const handleToggleFavorite = async () => {
+  const handleToggleFavorite = useCallback(async () => {
     if (!audioItem?.id) return;
     if (isFavorite(audioItem.id)) {
       await removeFavorite(audioItem.id);
     } else {
       await addFavorite(audioItem);
     }
-  };
+  }, [audioItem, isFavorite, removeFavorite, addFavorite]);
 
-  const handleSliderValueChange = async (value: number) => {
-    if (player) {
+  const handleSliderValueChange = useCallback(
+    async (value: number) => {
+      if (player) {
+        try {
+          await player.seekTo(value);
+        } catch (err) {
+          console.error("Error seeking audio:", err);
+        }
+      }
+    },
+    [player]
+  );
+
+  const handleSliderComplete = useCallback(
+    async (value: number) => {
+      if (!player) return;
       try {
         await player.seekTo(value);
       } catch (err) {
-        console.error("Error seeking audio:", err);
+        console.error("Error seeking:", err);
       }
-    }
-  };
+    },
+    [player]
+  );
 
-  const handleSliderComplete = async (value: number) => {
-    if (!player) return;
-
-    try {
-      await player.seekTo(value);
-    } catch (err) {
-      console.error("Error seeking:", err);
-    }
-  };
-
-  const handleLoop = async () => {
+  const handleLoop = useCallback(async () => {
     if (!player) return;
     try {
       const newLoopState = !isLoop;
@@ -355,13 +393,37 @@ const PlayScreen = () => {
     } catch (error) {
       console.error("Error enabling loop:", error);
     }
-  };
+  }, [player, isLoop]);
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     router.back();
-  };
+  }, [router]);
 
-  // ---- RENDER ----
+  const artworkContainerStyle = useMemo(
+    () => ({
+      width: width * 0.8,
+      height: width * 0.8,
+      borderRadius: 20,
+      backgroundColor: isDark
+        ? themeColors.dark.card
+        : themeColors.light.card,
+      justifyContent: "center" as const,
+      alignItems: "center" as const,
+    }),
+    [isDark]
+  );
+
+  const controlButtonStyle = useMemo(
+    () => ({
+      padding: 15,
+      borderRadius: 9999,
+      backgroundColor: isDark
+        ? themeColors.dark.card
+        : themeColors.light.card,
+    }),
+    [isDark]
+  );
+
   return (
     <SafeAreaView
       className="flex-1 w-full h-screen flex-col gap-8"
@@ -371,7 +433,7 @@ const PlayScreen = () => {
           : themeColors.light.background,
       }}
     >
-      {/* Header */}
+      {}
       <View className="flex-row items-center justify-between px-5 py-3">
         <TouchableOpacity
           onPress={handleBack}
@@ -401,20 +463,9 @@ const PlayScreen = () => {
         <View style={{ width: 40 }} />
       </View>
 
-      {/* Artwork */}
+      {}
       <View className="flex items-center justify-center mt-10">
-        <View
-          style={{
-            width: width * 0.8,
-            height: width * 0.8,
-            borderRadius: 20,
-            backgroundColor: isDark
-              ? themeColors.dark.card
-              : themeColors.light.card,
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
+        <View style={artworkContainerStyle}>
           <Image
             source={icon}
             style={{ width: "100%", height: "100%" }}
@@ -423,7 +474,7 @@ const PlayScreen = () => {
         </View>
       </View>
 
-      {/* Track info + favorite */}
+      {}
       <View className="flex flex-col gap-8 mt-5 px-10">
         <View className="flex flex-row justify-between items-center px-4">
           <View className="flex flex-col gap-2">
@@ -456,11 +507,7 @@ const PlayScreen = () => {
             onPress={handleToggleFavorite}
           >
             <Image
-              source={
-                audioItem?.id && isFavorite(audioItem.id)
-                  ? loveActiveIcon
-                  : loveIcon
-              }
+              source={isFavoriteAudio ? loveActiveIcon : loveIcon}
               className="w-6 h-5"
               resizeMode="contain"
               tintColor={
@@ -470,7 +517,7 @@ const PlayScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Slider */}
+        {}
         <View className="flex flex-col mt-5 w-full">
           <Slider
             minimumTrackTintColor={isDark ? "#d7ac61" : "#22946e"}
@@ -508,7 +555,7 @@ const PlayScreen = () => {
           </View>
         </View>
 
-        {/* Controls */}
+        {}
         <View
           className="mt-5 flex flex-row items-center justify-center"
           style={{ gap: 8 }}
@@ -527,7 +574,7 @@ const PlayScreen = () => {
                   : isDark && !isLoop
                     ? themeColors.dark.textLight
                     : !isDark && isLoop
-                      ? themeColors.dark.text
+                      ? themeColors.light.primary
                       : "#82B098"
               }
             />
@@ -549,13 +596,7 @@ const PlayScreen = () => {
 
           <TouchableOpacity
             onPress={handlePausePlay}
-            style={{
-              padding: 15,
-              borderRadius: 9999,
-              backgroundColor: isDark
-                ? themeColors.dark.card
-                : themeColors.light.card,
-            }}
+            style={controlButtonStyle}
           >
             <Image
               source={isPlaying ? pauseIcon : playIcon}
@@ -607,4 +648,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PlayScreen;
+export default React.memo(PlayScreen);
