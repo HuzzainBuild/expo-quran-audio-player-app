@@ -21,7 +21,7 @@ interface AudioState {
   didJustFinish: boolean;
   shouldAutoPlay: boolean;
 
-  activeScreen: "audio" | "favorites" | "player" | null;
+  activeScreen: "audio" | "favorites" | "player";
 
   favorites: AudioItem[];
 
@@ -37,7 +37,7 @@ interface AudioState {
   setDuration: (duration: number) => void;
   setDidJustFinish: (finished: boolean) => void;
   setShouldAutoPlay: (should: boolean) => void;
-  setActiveScreen: (screen: "audio" | "favorites" | null) => void;
+  setActiveScreen: (screen: "audio" | "favorites" | "player") => void;
 
   loadFavorites: () => Promise<void>;
   addFavorite: (item: AudioItem) => Promise<void>;
@@ -80,7 +80,7 @@ export const useAudioStore = create<AudioState>((set, get) => ({
   duration: 0,
   didJustFinish: false,
   shouldAutoPlay: false,
-  activeScreen: null,
+  activeScreen: "audio",
   favorites: [],
   isCaching: false,
   cachingProgress: {},

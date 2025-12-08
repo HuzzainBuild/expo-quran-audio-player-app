@@ -11,6 +11,10 @@ import {
   Text,
   View,
 } from "react-native";
+import {
+  OrientationLocker,
+  PORTRAIT,
+} from "react-native-orientation-locker";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const Verses = () => {
@@ -54,6 +58,7 @@ const Verses = () => {
           : themeColors.light.background,
       }}
     >
+      <OrientationLocker orientation={PORTRAIT} />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ padding: 16 }}

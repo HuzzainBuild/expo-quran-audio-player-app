@@ -32,6 +32,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import {
+  OrientationLocker,
+  PORTRAIT,
+} from "react-native-orientation-locker";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
@@ -77,7 +81,6 @@ const PlayScreen = () => {
     } else {
       setActiveScreen("audio");
     }
-    return () => setActiveScreen(null);
   }, [from]);
 
   const currentTimeDisplay = useMemo(
@@ -433,6 +436,7 @@ const PlayScreen = () => {
           : themeColors.light.background,
       }}
     >
+      <OrientationLocker orientation={PORTRAIT} />
       {}
       <View className="flex-row items-center justify-between px-5 py-3">
         <TouchableOpacity

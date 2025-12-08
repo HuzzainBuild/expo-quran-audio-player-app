@@ -12,6 +12,10 @@ import React, {
   useState,
 } from "react";
 import { FlatList, Text, View } from "react-native";
+import {
+  OrientationLocker,
+  PORTRAIT,
+} from "react-native-orientation-locker";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 interface AudioItem {
@@ -58,7 +62,6 @@ const FavoriteScreen = () => {
 
   useEffect(() => {
     setActiveScreen("favorites");
-    return () => setActiveScreen(null);
   }, []);
 
   useEffect(() => {
@@ -431,6 +434,7 @@ const FavoriteScreen = () => {
       className="flex-1 w-full px-5 h-screen overflow-hidden"
       style={containerStyle}
     >
+      <OrientationLocker orientation={PORTRAIT} />
       <View className="flex flex-col gap-5">
         <Text style={headerTextStyle}>Favorites</Text>
         <SearchBar
@@ -447,18 +451,8 @@ const FavoriteScreen = () => {
         ItemSeparatorComponent={() => ItemSeparator}
         ListEmptyComponent={EmptyComponent}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 150 }}
+        contentContainerStyle={{ paddingBottom: 280 }}
         className="flex-1 mt-10 w-full min-h-screen"
-        initialNumToRender={10}
-        maxToRenderPerBatch={10}
-        windowSize={5}
-        removeClippedSubviews={true}
-        updateCellsBatchingPeriod={50}
-        getItemLayout={(data, index) => ({
-          length: 80,
-          offset: 80 * index,
-          index,
-        })}
       />
 
       {audioItem && audioItem.url && (

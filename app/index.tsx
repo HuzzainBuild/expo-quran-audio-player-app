@@ -7,11 +7,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import {
+  OrientationLocker,
+  PORTRAIT,
+} from "react-native-orientation-locker";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function Index() {
   return (
-    <SafeAreaView className="flex-1 items-center justify-center bg-white w-full h-screen overflow-hidden ">
+    <SafeAreaView className="flex-1 items-center justify-center bg-white w-full min-h-screen overflow-hidden ">
+      <OrientationLocker orientation={PORTRAIT} />
       <ImageBackground
         source={homebg}
         className="flex-1 w-full h-full justify-center items-center flex-col gap-5 px-5"

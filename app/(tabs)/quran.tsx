@@ -10,6 +10,10 @@ import {
   Text,
   View,
 } from "react-native";
+import {
+  OrientationLocker,
+  PORTRAIT,
+} from "react-native-orientation-locker";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const Quran = () => {
@@ -74,13 +78,14 @@ const Quran = () => {
 
   return (
     <SafeAreaView
-      className="flex w-full bg-white px-5 h-screen overflow-hidden"
+      className="flex-1 w-full bg-white px-5 m-h-screen overflow-hidden"
       style={{
         backgroundColor: isDark
           ? themeColors.dark.background
           : themeColors.light.background,
       }}
     >
+      <OrientationLocker orientation={PORTRAIT} />
       <View className="flex flex-col gap-5">
         <Text
           style={{
@@ -138,7 +143,7 @@ const Quran = () => {
               </View>
             )}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 120 }}
+            contentContainerStyle={{ paddingBottom: 220 }}
             className="mt-8 w-full"
           />
         )}

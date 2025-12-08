@@ -18,6 +18,10 @@ import React, {
   useState,
 } from "react";
 import { FlatList, Text, View } from "react-native";
+import {
+  OrientationLocker,
+  PORTRAIT,
+} from "react-native-orientation-locker";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const AudioScreen = () => {
@@ -67,7 +71,6 @@ const AudioScreen = () => {
 
   useEffect(() => {
     setActiveScreen("audio");
-    return () => setActiveScreen(null);
   }, []);
 
   const player = useAudioPlayer(currentAudioUrl || "");
@@ -324,6 +327,8 @@ const AudioScreen = () => {
     [cacheAudio, isAudioCachedSync]
   );
 
+  console.log("Audio: ", activeScreen);
+
   const navigateToPlay = useCallback(
     (id: string, title: string, url: string, reciter: string) => {
       router.push(
@@ -414,6 +419,7 @@ const AudioScreen = () => {
           : themeColors.light.background,
       }}
     >
+      <OrientationLocker orientation={PORTRAIT} />
       <View className="flex flex-col gap-5">
         <Text
           style={{
@@ -442,13 +448,8 @@ const AudioScreen = () => {
         renderItem={renderItem}
         ListEmptyComponent={EmptyComponent}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 150 }}
+        contentContainerStyle={{ paddingBottom: 280 }}
         className="flex-1 mt-10 w-full min-h-screen"
-        initialNumToRender={10}
-        maxToRenderPerBatch={10}
-        windowSize={5}
-        removeClippedSubviews={true}
-        updateCellsBatchingPeriod={50}
       />
 
       {audioItem?.url && (

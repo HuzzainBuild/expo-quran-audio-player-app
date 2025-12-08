@@ -49,6 +49,14 @@
         }
       ],
       [
+        "expo-media-control",
+        {
+          "enableBackgroundAudio": true,
+          "audioSessionCategory": "playback",
+          "notificationIcon": "./assets/images/icon.png"
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {
@@ -63,7 +71,14 @@
         {
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone."
         }
-      ]
+      ],
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT"
+        }
+      ],
+      "expo-media-control"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -74,6 +89,7 @@
       "eas": {
         "projectId": "6e4090a7-89a5-4cc4-81e5-b7f0e6ce82ca"
       }
-    }
+    },
+    "owner": "huzzainbuild"
   }
 }

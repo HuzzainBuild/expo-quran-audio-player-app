@@ -60,7 +60,7 @@ const AudioBtn = ({
             <View className="flex-row items-center gap-4">
               <Image
                 source={icon}
-                style={{ width: 45, height: 45, borderRadius: 6 }}
+                style={{ width: 40, height: 40, borderRadius: 6 }}
                 resizeMode="cover"
               />
               <View className="flex flex-col ">
