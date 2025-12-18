@@ -13,6 +13,7 @@ import {
 import { icon } from "@/constant/images";
 import { quranAudioList } from "@/constant/quranAudioList";
 import { useAudioStore } from "@/store/audioStore";
+import { musicControlService } from "@/store/musicControlService";
 import { useThemeStore } from "@/store/themeStore";
 import { themeColors } from "@/style/theme";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,6 +26,7 @@ import React, {
   useState,
 } from "react";
 import {
+  AppState,
   Dimensions,
   Image,
   StyleSheet,
@@ -32,10 +34,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import {
-  OrientationLocker,
-  PORTRAIT,
-} from "react-native-orientation-locker";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
@@ -73,6 +71,8 @@ const PlayScreen = () => {
     isAudioCachedSync,
     initializeCache,
     setActiveScreen,
+    updateMusicControl,
+    cleanupMusicControl,
   } = useAudioStore();
 
   useEffect(() => {
@@ -99,7 +99,37 @@ const PlayScreen = () => {
 
   useEffect(() => {
     initializeCache();
+    loadFavorites();
+
+    musicControlService.initialize();
   }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      "change",
+      (nextAppState) => {
+        if (nextAppState === "active") {
+          updateMusicControl();
+        }
+      }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [updateMusicControl]);
+
+  useEffect(() => {
+    if (audioItem && duration > 0) {
+      updateMusicControl();
+    }
+  }, [
+    audioItem,
+    duration,
+    currentTime,
+    isPlaying,
+    updateMusicControl,
+  ]);
 
   const loadAudioWithCaching = useCallback(
     async (audioId: string) => {
@@ -172,10 +202,6 @@ const PlayScreen = () => {
       })();
     }
   }, [didJustFinish, isLoop, player, setIsPlaying]);
-
-  useEffect(() => {
-    loadFavorites();
-  }, []);
 
   const preCacheAdjacentTracks = useCallback(() => {
     if (!audioItem?.id) return;
@@ -287,7 +313,7 @@ const PlayScreen = () => {
   const handleNext = useCallback(async () => {
     if (!audioItem) return;
 
-    const { favorites } = useAudioStore.getState(); // get latest favorites from store
+    const { favorites } = useAudioStore.getState();
 
     const sortedFavorites = [...favorites].sort((a, b) =>
       a.title.localeCompare(b.title, undefined, {
@@ -295,12 +321,10 @@ const PlayScreen = () => {
       })
     );
 
-    // Determine which list to use
     const list =
       from === "favorites" ? sortedFavorites : quranAudioList;
     if (!list || list.length === 0) return;
 
-    // Find current index in the selected list
     const currentIndex = list.findIndex(
       (item) => item.id === audioItem.id
     );
@@ -309,10 +333,8 @@ const PlayScreen = () => {
       return;
     }
 
-    // Get next track
     const nextAudio = list[currentIndex + 1];
 
-    // Reset player before switching
     if (player) {
       await player.pause();
       await player.seekTo(0);
@@ -436,7 +458,6 @@ const PlayScreen = () => {
           : themeColors.light.background,
       }}
     >
-      <OrientationLocker orientation={PORTRAIT} />
       {}
       <View className="flex-row items-center justify-between px-5 py-3">
         <TouchableOpacity

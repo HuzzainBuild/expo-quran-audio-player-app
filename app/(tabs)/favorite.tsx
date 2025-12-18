@@ -2,6 +2,7 @@ import AudioBtn from "@/components/AudioBtn";
 import BottomControl from "@/components/BottomControl";
 import SearchBar from "@/components/SearchBar";
 import { useAudioStore } from "@/store/audioStore";
+import { musicControlService } from "@/store/musicControlService";
 import { useThemeStore } from "@/store/themeStore";
 import { themeColors } from "@/style/theme";
 import { useRouter } from "expo-router";
@@ -11,11 +12,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { FlatList, Text, View } from "react-native";
-import {
-  OrientationLocker,
-  PORTRAIT,
-} from "react-native-orientation-locker";
+import { AppState, FlatList, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 interface AudioItem {
@@ -58,7 +55,32 @@ const FavoriteScreen = () => {
     isAudioCachedSync,
     activeScreen,
     setActiveScreen,
+    updateMusicControl,
+    cleanupMusicControl,
   } = useAudioStore();
+
+  const sortedFavorites = useMemo(() => {
+    return [...favorites].sort((a, b) =>
+      a.title.localeCompare(b.title, undefined, {
+        sensitivity: "base",
+      })
+    );
+  }, [favorites]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener(
+      "change",
+      (nextAppState) => {
+        if (nextAppState === "active") {
+          updateMusicControl();
+        }
+      }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [updateMusicControl]);
 
   useEffect(() => {
     setActiveScreen("favorites");
@@ -68,16 +90,9 @@ const FavoriteScreen = () => {
     Promise.all([loadFavorites(), initializeCache()]).catch(
       console.error
     );
-  }, []);
 
-  // ✅ Sort favorites alphabetically by title
-  const sortedFavorites = useMemo(() => {
-    return [...favorites].sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, {
-        sensitivity: "base",
-      })
-    );
-  }, [favorites]);
+    musicControlService.initialize();
+  }, []);
 
   useEffect(() => {
     if (didJustFinish && activeScreen === "favorites") {
@@ -118,7 +133,6 @@ const FavoriteScreen = () => {
           `❌ Error handling audio playback for ${item.id}:`,
           error
         );
-
         setCurrentAudioUrl(item.url);
         setShouldAutoPlay(true);
       }
@@ -164,7 +178,6 @@ const FavoriteScreen = () => {
       (item) => item.id === audioItem?.id
     );
 
-    // 🔒 Stop if not found or already at the last favorite
     if (
       currentIndex === -1 ||
       currentIndex === sortedFavorites.length - 1
@@ -193,13 +206,6 @@ const FavoriteScreen = () => {
       );
       setCurrentAudioUrl(nextAudioUri);
       setShouldAutoPlay(true);
-
-      console.log(
-        `🎯 Next favorite: ${nextAudio.title} (${
-          nextAudioUri === nextAudio.url ? "REMOTE" : "CACHED"
-        })`
-      );
-
       preCacheAdjacentFavorites(nextIndex);
     } catch (error) {
       console.error("❌ Error switching to next favorite:", error);
@@ -229,7 +235,6 @@ const FavoriteScreen = () => {
       (item) => item.id === audioItem?.id
     );
 
-    // 🔒 Stop if not found or already at the first favorite
     if (currentIndex === -1 || currentIndex === 0) {
       console.log(
         "✅ Reached the beginning of the favorites list. No previous track."
@@ -255,13 +260,6 @@ const FavoriteScreen = () => {
       );
       setCurrentAudioUrl(prevAudioUri);
       setShouldAutoPlay(true);
-
-      console.log(
-        `🎯 Previous favorite: ${prevAudio.title} (${
-          prevAudioUri === prevAudio.url ? "REMOTE" : "CACHED"
-        })`
-      );
-
       preCacheAdjacentFavorites(prevIndex);
     } catch (error) {
       console.error(
@@ -321,9 +319,13 @@ const FavoriteScreen = () => {
   const navigateToPlay = useCallback(
     (id: string, title: string, url: string, reciter: string) => {
       router.push(
-        `/play/${id}?title=${encodeURIComponent(title)}&url=${encodeURIComponent(
+        `/play/${id}?title=${encodeURIComponent(
+          title
+        )}&url=${encodeURIComponent(
           url
-        )}&reciter=${encodeURIComponent(reciter)}&from=${encodeURIComponent("favorites")}`
+        )}&reciter=${encodeURIComponent(
+          reciter
+        )}&from=${encodeURIComponent("favorites")}`
       );
     },
     [router]
@@ -434,7 +436,6 @@ const FavoriteScreen = () => {
       className="flex-1 w-full px-5 h-screen overflow-hidden"
       style={containerStyle}
     >
-      <OrientationLocker orientation={PORTRAIT} />
       <View className="flex flex-col gap-5">
         <Text style={headerTextStyle}>Favorites</Text>
         <SearchBar
@@ -451,8 +452,18 @@ const FavoriteScreen = () => {
         ItemSeparatorComponent={() => ItemSeparator}
         ListEmptyComponent={EmptyComponent}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 280 }}
+        contentContainerStyle={{ paddingBottom: 150 }}
         className="flex-1 mt-10 w-full min-h-screen"
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={5}
+        removeClippedSubviews={true}
+        updateCellsBatchingPeriod={50}
+        getItemLayout={(data, index) => ({
+          length: 80,
+          offset: 80 * index,
+          index,
+        })}
       />
 
       {audioItem && audioItem.url && (

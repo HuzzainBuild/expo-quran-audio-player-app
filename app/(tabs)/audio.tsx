@@ -3,6 +3,7 @@ import BottomControl from "@/components/BottomControl";
 import SearchBar from "@/components/SearchBar";
 import { quranAudioList } from "@/constant/quranAudioList";
 import { useAudioStore } from "@/store/audioStore";
+import { musicControlService } from "@/store/musicControlService";
 import { useThemeStore } from "@/store/themeStore";
 import { themeColors } from "@/style/theme";
 import {
@@ -67,35 +68,54 @@ const AudioScreen = () => {
     isAudioCachedSync,
     activeScreen,
     setActiveScreen,
+    updateMusicControl,
   } = useAudioStore();
 
+  // Set active screen on mount
   useEffect(() => {
     setActiveScreen("audio");
-  }, []);
+  }, [setActiveScreen]);
 
   const player = useAudioPlayer(currentAudioUrl || "");
   const audioStatus = useAudioPlayerStatus(player);
 
   const { currentTime, duration, didJustFinish } = audioStatus;
 
+  // Initialize player, favorites, cache, and music control
   useEffect(() => {
     if (player) setPlayer(player);
 
-    Promise.all([loadFavorites(), initializeCache()]).catch(
-      console.error
-    );
+    const initialize = async () => {
+      try {
+        // Initialize music control
+        musicControlService.initialize();
 
-    const setAudioModeSetUp = async () => {
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        shouldPlayInBackground: true,
-        interruptionModeAndroid: "doNotMix",
-        interruptionMode: "doNotMix",
-      });
+        // Load favorites and cache
+        await Promise.all([loadFavorites(), initializeCache()]);
+
+        // Setup audio mode for background playback
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: true,
+          interruptionModeAndroid: "doNotMix",
+          interruptionMode: "doNotMix",
+        });
+
+        console.log("✅ Audio screen initialized successfully");
+      } catch (error) {
+        console.error("❌ Error initializing audio screen:", error);
+      }
     };
-    setAudioModeSetUp();
-  }, [player]);
 
+    initialize();
+
+    // Cleanup on unmount
+    return () => {
+      console.log("🧹 Audio screen unmounting");
+    };
+  }, [player, loadFavorites, initializeCache, setPlayer]);
+
+  // Sync audio status with store
   useEffect(() => {
     if (audioStatus?.isLoaded) {
       setCurrentTime(currentTime);
@@ -109,8 +129,26 @@ const AudioScreen = () => {
     duration,
     audioStatus?.playing,
     didJustFinish,
+    setCurrentTime,
+    setDuration,
+    setIsPlaying,
+    setDidJustFinish,
   ]);
 
+  // Update music control when audio state changes
+  useEffect(() => {
+    if (audioItem && duration > 0) {
+      updateMusicControl();
+    }
+  }, [
+    audioItem,
+    duration,
+    currentTime,
+    isPlaying,
+    updateMusicControl,
+  ]);
+
+  // Handle auto-play when audio URL changes
   useEffect(() => {
     if (currentAudioUrl && shouldAutoPlay) {
       const playAudio = async () => {
@@ -118,24 +156,44 @@ const AudioScreen = () => {
           await player.seekTo(0);
           await player.play();
           setIsPlaying(true);
+          console.log(`▶️ Auto-playing: ${audioItem?.title}`);
         } catch (err) {
-          console.error("Error playing audio:", err);
+          console.error("❌ Error auto-playing audio:", err);
         } finally {
           setShouldAutoPlay(false);
         }
       };
       playAudio();
     }
-  }, [currentAudioUrl, shouldAutoPlay]);
+  }, [
+    currentAudioUrl,
+    shouldAutoPlay,
+    player,
+    setIsPlaying,
+    setShouldAutoPlay,
+    audioItem,
+  ]);
 
+  // Handle track completion and auto-advance
   useEffect(() => {
     if (didJustFinish && activeScreen === "audio") {
-      player.pause();
-      player.seekTo(0);
-      setIsPlaying(false);
-      handleNext(true);
+      const handleCompletion = async () => {
+        try {
+          await player.pause();
+          await player.seekTo(0);
+          setIsPlaying(false);
+
+          // Auto-advance to next track
+          await handleNext(true);
+          console.log("✅ Track completed, advancing to next");
+        } catch (error) {
+          console.error("❌ Error handling track completion:", error);
+        }
+      };
+
+      handleCompletion();
     }
-  }, [didJustFinish, activeScreen]);
+  }, [didJustFinish, activeScreen, player, setIsPlaying]);
 
   const handlePress = useCallback(
     async (
@@ -145,19 +203,26 @@ const AudioScreen = () => {
       reciter: string
     ) => {
       const newAudio = { url, title, id, reciter };
+
+      // Check if this is the currently playing audio
+      const isSameAudio = audioItem?.id === id;
+
       setAudioItem(newAudio);
 
       try {
         const audioUri = await getCachedAudioUrl(id, url);
 
-        if (audioUri !== currentAudioUrl) {
+        if (!isSameAudio) {
+          // New audio selected - load and play
           setCurrentAudioUrl(audioUri);
           setShouldAutoPlay(true);
 
+          // Cache in background if not cached
           if (!isAudioCachedSync(id)) {
             cacheAudio(id, url).catch(console.error);
           }
         } else if (!isPlaying) {
+          // Same audio, just resume playback
           await player.play();
           setIsPlaying(true);
         }
@@ -171,6 +236,7 @@ const AudioScreen = () => {
       }
     },
     [
+      audioItem,
       currentAudioUrl,
       isPlaying,
       player,
@@ -191,12 +257,14 @@ const AudioScreen = () => {
       if (isPlaying) {
         await player.pause();
         setIsPlaying(false);
+        console.log("⏸️ Paused playback");
       } else {
         await player.play();
         setIsPlaying(true);
+        console.log("▶️ Resumed playback");
       }
     } catch (err) {
-      console.error("Error toggling playback:", err);
+      console.error("❌ Error toggling playback:", err);
     }
   }, [player, isPlaying, setIsPlaying]);
 
@@ -210,15 +278,14 @@ const AudioScreen = () => {
         currentIndex === -1 ||
         currentIndex === quranAudioList.length - 1
       ) {
-        console.log(
-          "Reached the end of the Quran audio list. No next track."
-        );
+        console.log("✅ End of list reached");
         return;
       }
 
       const nextIndex = currentIndex + 1;
       const nextAudio = quranAudioList[nextIndex];
 
+      // Stop current playback
       if (player && isPlaying) {
         await player.pause();
         await player.seekTo(0);
@@ -234,9 +301,11 @@ const AudioScreen = () => {
         );
         setCurrentAudioUrl(nextAudioUri);
 
+        // Pre-cache adjacent tracks
         preCacheAdjacentTracks(nextIndex);
 
         setShouldAutoPlay(true);
+        console.log(`⏭️ Switched to: ${nextAudio.title}`);
       } catch (error) {
         console.error("❌ Error switching to next track:", error);
         setCurrentAudioUrl(nextAudio.url);
@@ -252,7 +321,6 @@ const AudioScreen = () => {
       setIsPlaying,
       setShouldAutoPlay,
       getCachedAudioUrl,
-      quranAudioList,
     ]
   );
 
@@ -262,15 +330,14 @@ const AudioScreen = () => {
     );
 
     if (currentIndex === -1 || currentIndex === 0) {
-      console.log(
-        "Reached the beginning of the Quran audio list. No previous track."
-      );
+      console.log("✅ Start of list reached");
       return;
     }
 
     const prevIndex = currentIndex - 1;
     const prevAudio = quranAudioList[prevIndex];
 
+    // Stop current playback
     if (player && isPlaying) {
       await player.pause();
       await player.seekTo(0);
@@ -286,9 +353,11 @@ const AudioScreen = () => {
       );
       setCurrentAudioUrl(prevAudioUri);
 
+      // Pre-cache adjacent tracks
       preCacheAdjacentTracks(prevIndex);
 
       setShouldAutoPlay(true);
+      console.log(`⏮️ Switched to: ${prevAudio.title}`);
     } catch (error) {
       console.error("❌ Error switching to previous track:", error);
       setCurrentAudioUrl(prevAudio.url);
@@ -303,31 +372,33 @@ const AudioScreen = () => {
     setIsPlaying,
     setShouldAutoPlay,
     getCachedAudioUrl,
-    quranAudioList,
   ]);
 
   const preCacheAdjacentTracks = useCallback(
     (currentIndex: number) => {
-      const nextIndex = (currentIndex + 1) % quranAudioList.length;
-      const prevIndex =
-        (currentIndex - 1 + quranAudioList.length) %
-        quranAudioList.length;
+      const nextIndex = currentIndex + 1;
+      const prevIndex = currentIndex - 1;
 
-      const nextAudio = quranAudioList[nextIndex];
-      const prevAudio = quranAudioList[prevIndex];
-
-      if (!isAudioCachedSync(nextAudio.id)) {
-        cacheAudio(nextAudio.id, nextAudio.url).catch(console.error);
+      if (nextIndex < quranAudioList.length) {
+        const nextAudio = quranAudioList[nextIndex];
+        if (!isAudioCachedSync(nextAudio.id)) {
+          cacheAudio(nextAudio.id, nextAudio.url).catch(
+            console.error
+          );
+        }
       }
 
-      if (!isAudioCachedSync(prevAudio.id)) {
-        cacheAudio(prevAudio.id, prevAudio.url).catch(console.error);
+      if (prevIndex >= 0) {
+        const prevAudio = quranAudioList[prevIndex];
+        if (!isAudioCachedSync(prevAudio.id)) {
+          cacheAudio(prevAudio.id, prevAudio.url).catch(
+            console.error
+          );
+        }
       }
     },
     [cacheAudio, isAudioCachedSync]
   );
-
-  console.log("Audio: ", activeScreen);
 
   const navigateToPlay = useCallback(
     (id: string, title: string, url: string, reciter: string) => {
@@ -394,7 +465,7 @@ const AudioScreen = () => {
 
   const EmptyComponent = useMemo(
     () => (
-      <View className="flex-1 justify-center items-center">
+      <View className="flex-1 justify-center items-center py-10">
         <Text
           className="text-base"
           style={{

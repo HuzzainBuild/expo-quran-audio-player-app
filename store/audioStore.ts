@@ -1,3 +1,5 @@
+// audioSTore.ts
+import { musicControlService } from "@/store/musicControlService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AudioPlayer } from "expo-audio";
 import { create } from "zustand";
@@ -67,6 +69,9 @@ interface AudioState {
     totalSize: number;
     averageSize: number;
   }>;
+
+  updateMusicControl: () => void;
+  cleanupMusicControl: () => void;
 }
 
 const FAVORITES_KEY = "audio_favorites";
@@ -86,14 +91,39 @@ export const useAudioStore = create<AudioState>((set, get) => ({
   cachingProgress: {},
   isCacheInitialized: false,
 
-  setAudioItem: (item) => set({ audioItem: item }),
+  setAudioItem: (item) => {
+    set({ audioItem: item });
+
+    if (item) {
+      setTimeout(() => get().updateMusicControl(), 100);
+    }
+  },
+
   setCurrentAudioUrl: (url) => set({ currentAudioUrl: url }),
+
   setPlayer: (player) => set({ player }),
-  setIsPlaying: (playing) => set({ isPlaying: playing }),
-  setCurrentTime: (time) => set({ currentTime: time }),
-  setDuration: (duration) => set({ duration }),
+
+  setIsPlaying: (playing) => {
+    set({ isPlaying: playing });
+
+    const { currentTime } = get();
+    musicControlService.updatePlaybackState(playing, currentTime);
+  },
+
+  setCurrentTime: (time) => {
+    set({ currentTime: time });
+  },
+
+  setDuration: (duration) => {
+    set({ duration });
+
+    setTimeout(() => get().updateMusicControl(), 100);
+  },
+
   setDidJustFinish: (finished) => set({ didJustFinish: finished }),
+
   setShouldAutoPlay: (should) => set({ shouldAutoPlay: should }),
+
   setActiveScreen: (screen) => set({ activeScreen: screen }),
 
   loadFavorites: async () => {
@@ -192,11 +222,38 @@ export const useAudioStore = create<AudioState>((set, get) => ({
 
   removeCachedAudio: async (id) =>
     audioCacheManager.removeCacheEntry(id),
+
   clearAllCache: async () => audioCacheManager.clearAllCache(),
+
   getCacheStatus: (id) =>
     audioCacheManager.getCacheInfo(id) || { isCached: false },
+
   getTotalCacheSize: () => audioCacheManager.getTotalCacheSize(),
+
   isAudioCached: (id) => audioCacheManager.isCachedAndValid(id),
+
   isAudioCachedSync: (id) => audioCacheManager.isCached(id),
+
   getCacheStats: async () => audioCacheManager.getCacheStats(),
+
+  updateMusicControl: () => {
+    const { audioItem, duration, currentTime, isPlaying } = get();
+
+    if (audioItem && duration > 0) {
+      musicControlService.updateNowPlaying({
+        title: audioItem.title,
+        artist: audioItem.reciter || "Unknown Artist",
+        duration,
+        isPlaying,
+        elapsedTime: currentTime,
+      });
+    }
+  },
+
+  cleanupMusicControl: () => {
+    musicControlService.resetControls();
+    musicControlService.removeListeners();
+  },
 }));
+
+musicControlService.setStoreRef(useAudioStore);

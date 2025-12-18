@@ -204,7 +204,7 @@ class AudioCacheManager {
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error("Download timeout")),
-            60000
+            100000
           )
         ),
       ]);
