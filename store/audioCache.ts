@@ -173,18 +173,14 @@ class AudioCacheManager {
     }
   }
 
-  /**
-   * 🔥 NEW: Throttle concurrent downloads
-   */
+
   private async waitForDownloadSlot(): Promise<void> {
     while (this.activeDownloads.size >= MAX_CONCURRENT_DOWNLOADS) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   }
 
-  /**
-   * 🔥 OPTIMIZATION: Enhanced error handling and network validation
-   */
+
   private async _downloadAudio(
     id: string,
     remoteUrl: string

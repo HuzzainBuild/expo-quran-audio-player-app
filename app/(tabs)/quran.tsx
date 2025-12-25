@@ -91,7 +91,6 @@ const Quran = () => {
           style={{
             fontSize: 30,
             fontFamily: "NunitoSans-Bold",
-            marginTop: 10,
             color: isDark
               ? themeColors.dark.text
               : themeColors.light.primary,

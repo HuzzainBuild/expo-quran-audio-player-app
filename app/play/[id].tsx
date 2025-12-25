@@ -11,22 +11,14 @@ import {
   previousIcon,
 } from "@/constant/icons";
 import { icon } from "@/constant/images";
-import { quranAudioList } from "@/constant/quranAudioList";
 import { useAudioStore } from "@/store/audioStore";
-import { musicControlService } from "@/store/musicControlService";
 import { useThemeStore } from "@/store/themeStore";
 import { themeColors } from "@/style/theme";
 import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useMemo } from "react";
 import {
-  AppState,
   Dimensions,
   Image,
   StyleSheet,
@@ -41,388 +33,49 @@ const { width } = Dimensions.get("window");
 const PlayScreen = () => {
   const params = useLocalSearchParams();
   const router = useRouter();
-
-  const { from } = params as { from?: string };
-
-  const [isLoop, setIsLoop] = useState(false);
-
   const { theme } = useThemeStore();
   const isDark = theme === "dark";
 
   const {
     audioItem,
-    currentAudioUrl,
-    shouldAutoPlay,
     isPlaying,
     currentTime,
     duration,
-    player,
-    didJustFinish,
-    loadFavorites,
-    addFavorite,
-    removeFavorite,
+    isLooping,
+    isShuffling,
     isFavorite,
     setAudioItem,
-    setCurrentAudioUrl,
-    setIsPlaying,
-    setShouldAutoPlay,
-    getCachedAudioUrl,
-    cacheAudio,
-    isAudioCachedSync,
-    initializeCache,
-    setActiveScreen,
-    updateMusicControl,
-    cleanupMusicControl,
+    playNext,
+    playPrevious,
+    togglePlayPause,
+    toggleLooping,
+    toggleShuffling,
+    addFavorite,
+    removeFavorite,
+    seekTo,
   } = useAudioStore();
 
-  useEffect(() => {
-    if (from === "favorites") {
-      setActiveScreen("favorites");
-    } else {
-      setActiveScreen("audio");
-    }
-  }, [from]);
-
-  const currentTimeDisplay = useMemo(
-    () => formatTime(currentTime),
-    [currentTime]
-  );
-  const durationDisplay = useMemo(
-    () => formatTime(duration),
-    [duration]
-  );
-
-  const isFavoriteAudio = useMemo(
-    () => audioItem?.id && isFavorite(audioItem.id),
-    [audioItem?.id, isFavorite]
-  );
-
-  useEffect(() => {
-    initializeCache();
-    loadFavorites();
-
-    musicControlService.initialize();
-  }, []);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener(
-      "change",
-      (nextAppState) => {
-        if (nextAppState === "active") {
-          updateMusicControl();
-        }
-      }
-    );
-
-    return () => {
-      subscription.remove();
-    };
-  }, [updateMusicControl]);
-
-  useEffect(() => {
-    if (audioItem && duration > 0) {
-      updateMusicControl();
-    }
-  }, [
-    audioItem,
-    duration,
-    currentTime,
-    isPlaying,
-    updateMusicControl,
-  ]);
-
-  const loadAudioWithCaching = useCallback(
-    async (audioId: string) => {
-      const selectedAudio = quranAudioList.find(
-        (item) => item.id === audioId
-      );
-
-      if (!selectedAudio) {
-        console.error("❌ Audio not found for ID:", audioId);
-        return;
-      }
-
-      if (selectedAudio.id === audioItem?.id) return;
-
-      console.log(`🎯 Loading audio: ${selectedAudio.title}`);
-      setAudioItem(selectedAudio);
-
-      try {
-        const cachedUrl = await getCachedAudioUrl(
-          selectedAudio.id,
-          selectedAudio.url
-        );
-        setCurrentAudioUrl(cachedUrl);
-        setShouldAutoPlay(true);
-
-        if (!isAudioCachedSync(selectedAudio.id)) {
-          cacheAudio(selectedAudio.id, selectedAudio.url).catch(
-            console.error
-          );
-        }
-      } catch (error) {
-        console.error("❌ Error getting cached URL:", error);
-        setCurrentAudioUrl(selectedAudio.url);
-        setShouldAutoPlay(true);
-      }
-    },
-    [
-      audioItem?.id,
-      setAudioItem,
-      setCurrentAudioUrl,
-      setShouldAutoPlay,
-      getCachedAudioUrl,
-      cacheAudio,
-      isAudioCachedSync,
-    ]
-  );
-
+  // Only set audio item if navigating to a different audio
   useEffect(() => {
     if (params.id && typeof params.id === "string") {
-      loadAudioWithCaching(params.id);
-    }
-  }, [params.id]);
-
-  useEffect(() => {
-    if (audioItem?.id) {
-      preCacheAdjacentTracks();
-    }
-  }, [audioItem?.id]);
-
-  useEffect(() => {
-    if (didJustFinish && player && !isLoop) {
-      (async () => {
-        try {
-          await player.pause();
-          await player.seekTo(0);
-          setIsPlaying(false);
-        } catch (error) {
-          console.error("❌ Error resetting player:", error);
-        }
-      })();
-    }
-  }, [didJustFinish, isLoop, player, setIsPlaying]);
-
-  const preCacheAdjacentTracks = useCallback(() => {
-    if (!audioItem?.id) return;
-
-    const currentIndex = quranAudioList.findIndex(
-      (item) => item.id === audioItem.id
-    );
-    if (currentIndex === -1) return;
-
-    const nextIndex = (currentIndex + 1) % quranAudioList.length;
-    const prevIndex =
-      (currentIndex - 1 + quranAudioList.length) %
-      quranAudioList.length;
-
-    const nextAudio = quranAudioList[nextIndex];
-    const prevAudio = quranAudioList[prevIndex];
-
-    if (!isAudioCachedSync(nextAudio.id)) {
-      cacheAudio(nextAudio.id, nextAudio.url).catch(console.error);
-    }
-
-    if (!isAudioCachedSync(prevAudio.id)) {
-      cacheAudio(prevAudio.id, prevAudio.url).catch(console.error);
-    }
-  }, [audioItem?.id, cacheAudio, isAudioCachedSync]);
-
-  const handlePausePlay = useCallback(async () => {
-    if (!player) return;
-    try {
-      if (isPlaying) {
-        await player.pause();
-        setIsPlaying(false);
-      } else {
-        await player.play();
-        setIsPlaying(true);
+      // Only set if the audio is different from currently playing
+      if (!audioItem || audioItem.id !== params.id) {
+        const selectedAudio =
+          useAudioStore
+            .getState()
+            .playlist.find((item) => item.id === params.id) || null;
+        setAudioItem(selectedAudio);
       }
-    } catch (err) {
-      console.error("Error toggling playback:", err);
     }
-  }, [player, isPlaying, setIsPlaying]);
+  }, [params.id]); // Removed setAudioItem and audioItem from dependencies
 
-  const handlePrevious = useCallback(async () => {
-    if (!audioItem) return;
-
-    const { favorites } = useAudioStore.getState();
-
-    const sortedFavorites = [...favorites].sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, {
-        sensitivity: "base",
-      })
-    );
-    const list =
-      from === "favorites" ? sortedFavorites : quranAudioList;
-
-    if (!list || list.length === 0) return;
-
-    const currentIndex = list.findIndex(
-      (item) => item.id === audioItem.id
-    );
-    if (currentIndex <= 0) {
-      console.log(
-        "Reached the beginning of the list. No previous track."
-      );
-      return;
-    }
-
-    const prevAudio = list[currentIndex - 1];
-
-    if (player) {
-      await player.pause();
-      await player.seekTo(0);
-      setIsPlaying(false);
-    }
-
-    setAudioItem(prevAudio);
-
-    try {
-      const prevAudioUri = await getCachedAudioUrl(
-        prevAudio.id,
-        prevAudio.url
-      );
-      setCurrentAudioUrl(prevAudioUri);
-      setShouldAutoPlay(true);
-
-      router.setParams({
-        id: prevAudio.id,
-        title: prevAudio.title,
-        url: prevAudio.url,
-        reciter: prevAudio.reciter,
-        from,
-      });
-    } catch (error) {
-      console.error("❌ Error switching to previous track:", error);
-      setCurrentAudioUrl(prevAudio.url);
-      setShouldAutoPlay(true);
-    }
-  }, [
-    from,
-    audioItem,
-    player,
-    setIsPlaying,
-    setAudioItem,
-    getCachedAudioUrl,
-    setCurrentAudioUrl,
-    setShouldAutoPlay,
-    router,
-  ]);
-
-  const handleNext = useCallback(async () => {
-    if (!audioItem) return;
-
-    const { favorites } = useAudioStore.getState();
-
-    const sortedFavorites = [...favorites].sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, {
-        sensitivity: "base",
-      })
-    );
-
-    const list =
-      from === "favorites" ? sortedFavorites : quranAudioList;
-    if (!list || list.length === 0) return;
-
-    const currentIndex = list.findIndex(
-      (item) => item.id === audioItem.id
-    );
-    if (currentIndex === -1 || currentIndex === list.length - 1) {
-      console.log("Reached the end of the list. No next track.");
-      return;
-    }
-
-    const nextAudio = list[currentIndex + 1];
-
-    if (player) {
-      await player.pause();
-      await player.seekTo(0);
-      setIsPlaying(false);
-    }
-
-    setAudioItem(nextAudio);
-
-    try {
-      const nextAudioUri = await getCachedAudioUrl(
-        nextAudio.id,
-        nextAudio.url
-      );
-      setCurrentAudioUrl(nextAudioUri);
-      setShouldAutoPlay(true);
-
-      router.setParams({
-        id: nextAudio.id,
-        title: nextAudio.title,
-        url: nextAudio.url,
-        reciter: nextAudio.reciter,
-        from,
-      });
-    } catch (error) {
-      console.error("❌ Error switching to next track:", error);
-      setCurrentAudioUrl(nextAudio.url);
-      setShouldAutoPlay(true);
-    }
-  }, [
-    from,
-    audioItem,
-    player,
-    setIsPlaying,
-    setAudioItem,
-    getCachedAudioUrl,
-    setCurrentAudioUrl,
-    setShouldAutoPlay,
-    router,
-  ]);
-
-  const handleToggleFavorite = useCallback(async () => {
-    if (!audioItem?.id) return;
-    if (isFavorite(audioItem.id)) {
-      await removeFavorite(audioItem.id);
-    } else {
-      await addFavorite(audioItem);
+  const handleToggleFavorite = useCallback(() => {
+    if (audioItem) {
+      isFavorite(audioItem.id)
+        ? removeFavorite(audioItem.id)
+        : addFavorite(audioItem);
     }
   }, [audioItem, isFavorite, removeFavorite, addFavorite]);
-
-  const handleSliderValueChange = useCallback(
-    async (value: number) => {
-      if (player) {
-        try {
-          await player.seekTo(value);
-        } catch (err) {
-          console.error("Error seeking audio:", err);
-        }
-      }
-    },
-    [player]
-  );
-
-  const handleSliderComplete = useCallback(
-    async (value: number) => {
-      if (!player) return;
-      try {
-        await player.seekTo(value);
-      } catch (err) {
-        console.error("Error seeking:", err);
-      }
-    },
-    [player]
-  );
-
-  const handleLoop = useCallback(async () => {
-    if (!player) return;
-    try {
-      const newLoopState = !isLoop;
-      player.loop = newLoopState;
-      setIsLoop(newLoopState);
-    } catch (error) {
-      console.error("Error enabling loop:", error);
-    }
-  }, [player, isLoop]);
-
-  const handleBack = useCallback(() => {
-    router.back();
-  }, [router]);
 
   const artworkContainerStyle = useMemo(
     () => ({
@@ -438,17 +91,6 @@ const PlayScreen = () => {
     [isDark]
   );
 
-  const controlButtonStyle = useMemo(
-    () => ({
-      padding: 15,
-      borderRadius: 9999,
-      backgroundColor: isDark
-        ? themeColors.dark.card
-        : themeColors.light.card,
-    }),
-    [isDark]
-  );
-
   return (
     <SafeAreaView
       className="flex-1 w-full h-screen flex-col gap-8"
@@ -458,37 +100,25 @@ const PlayScreen = () => {
           : themeColors.light.background,
       }}
     >
-      {}
       <View className="flex-row items-center justify-between px-5 py-3">
-        <TouchableOpacity
-          onPress={handleBack}
-          style={styles.iconButton}
-        >
+        <TouchableOpacity onPress={() => router.back()}>
           <Ionicons
             name="chevron-back"
             size={28}
-            color={
-              isDark
-                ? themeColors.dark.text
-                : themeColors.light.primary
-            }
+            color={isDark ? "white" : "black"}
           />
         </TouchableOpacity>
         <Text
-          style={{
-            fontSize: 18,
-            fontFamily: "NunitoSans-Bold",
-            color: isDark
-              ? themeColors.dark.text
-              : themeColors.light.text,
-          }}
+          style={[
+            styles.headerText,
+            { color: isDark ? "white" : "black" },
+          ]}
         >
           Now Playing
         </Text>
-        <View style={{ width: 40 }} />
+        <View style={{ width: 28 }} />
       </View>
 
-      {}
       <View className="flex items-center justify-center mt-10">
         <View style={artworkContainerStyle}>
           <Image
@@ -499,7 +129,6 @@ const PlayScreen = () => {
         </View>
       </View>
 
-      {}
       <View className="flex flex-col gap-8 mt-5 px-10">
         <View className="flex flex-row justify-between items-center px-4">
           <View className="flex flex-col gap-2">
@@ -532,7 +161,11 @@ const PlayScreen = () => {
             onPress={handleToggleFavorite}
           >
             <Image
-              source={isFavoriteAudio ? loveActiveIcon : loveIcon}
+              source={
+                audioItem && isFavorite(audioItem.id)
+                  ? loveActiveIcon
+                  : loveIcon
+              }
               className="w-6 h-5"
               resizeMode="contain"
               tintColor={
@@ -541,136 +174,176 @@ const PlayScreen = () => {
             />
           </TouchableOpacity>
         </View>
+      </View>
 
-        {}
-        <View className="flex flex-col mt-5 w-full">
-          <Slider
-            minimumTrackTintColor={isDark ? "#d7ac61" : "#22946e"}
-            maximumTrackTintColor={isDark ? "#ecd7b2" : "#9ae8ce"}
-            thumbTintColor={isDark ? "#d7ac61" : "#95b49f"}
-            value={didJustFinish ? 0 : currentTime}
-            maximumValue={duration || 1}
-            minimumValue={0}
-            onValueChange={handleSliderValueChange}
-            onSlidingComplete={handleSliderComplete}
-            className="w-full h-10"
-            disabled={!player || duration === 0}
-          />
-          <View className="w-full flex flex-row justify-between items-center px-4">
-            <Text
-              className="text-sm font-medium"
-              style={{
-                color: isDark
-                  ? themeColors.dark.textLight
-                  : themeColors.light.textLight,
-              }}
-            >
-              {currentTimeDisplay}
-            </Text>
-            <Text
-              className="text-sm font-medium"
-              style={{
-                color: isDark
-                  ? themeColors.dark.textLight
-                  : themeColors.light.textLight,
-              }}
-            >
-              {durationDisplay}
-            </Text>
-          </View>
+      <View className="flex flex-col mt-5 w-ful px-10">
+        <Slider
+          value={currentTime}
+          maximumValue={duration}
+          onSlidingComplete={seekTo}
+        />
+        <View className="w-full flex flex-row justify-between items-center px-4">
+          <Text
+            className="text-sm font-medium"
+            style={{
+              color: isDark
+                ? themeColors.dark.textLight
+                : themeColors.light.textLight,
+            }}
+          >
+            {formatTime(currentTime)}
+          </Text>
+          <Text
+            className="text-sm font-medium"
+            style={{
+              color: isDark
+                ? themeColors.dark.textLight
+                : themeColors.light.textLight,
+            }}
+          >
+            {formatTime(duration)}
+          </Text>
         </View>
+      </View>
 
-        {}
-        <View
-          className="mt-5 flex flex-row items-center justify-center"
-          style={{ gap: 8 }}
+      <View
+        className="mt-5 flex flex-row items-center justify-center"
+        style={{ gap: 8 }}
+      >
+        <TouchableOpacity
+          onPress={toggleLooping}
+          style={{ padding: 15 }}
         >
-          <TouchableOpacity
-            onPress={handleLoop}
-            style={{ padding: 15 }}
-          >
-            <Image
-              source={isLoop ? loopActiveIcon : loopIcon}
-              style={{ width: 22, height: 22 }}
-              resizeMode="contain"
-              tintColor={
-                isDark && isLoop
-                  ? themeColors.dark.text
-                  : isDark && !isLoop
-                    ? themeColors.dark.textLight
-                    : !isDark && isLoop
-                      ? themeColors.light.primary
-                      : "#82B098"
-              }
-            />
-          </TouchableOpacity>
+          <Image
+            source={isLooping ? loopActiveIcon : loopIcon}
+            style={{ width: 22, height: 22 }}
+            resizeMode="contain"
+            tintColor={
+              isDark && isLooping
+                ? themeColors.dark.text
+                : isDark && !isLooping
+                  ? themeColors.dark.textLight
+                  : !isDark && isLooping
+                    ? themeColors.light.primary
+                    : "#82B098"
+            }
+          />
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={handlePrevious}
-            style={{ padding: 15 }}
-          >
-            <Image
-              source={previousIcon}
-              style={{ width: 22, height: 22 }}
-              resizeMode="contain"
-              tintColor={
-                isDark ? themeColors.dark.textLight : "#82B098"
-              }
-            />
-          </TouchableOpacity>
+        <TouchableOpacity
+          onPress={playPrevious}
+          style={{ padding: 15 }}
+        >
+          <Image
+            source={previousIcon}
+            style={{ width: 22, height: 22 }}
+            resizeMode="contain"
+            tintColor={
+              isDark ? themeColors.dark.textLight : "#82B098"
+            }
+          />
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={handlePausePlay}
-            style={controlButtonStyle}
-          >
-            <Image
-              source={isPlaying ? pauseIcon : playIcon}
-              style={{ width: 22, height: 22 }}
-              resizeMode="contain"
-              tintColor={isDark ? themeColors.dark.text : "#0c5b34"}
-            />
-          </TouchableOpacity>
+        <TouchableOpacity onPress={togglePlayPause}>
+          <Image
+            source={isPlaying ? pauseIcon : playIcon}
+            style={{ width: 22, height: 22 }}
+            resizeMode="contain"
+            tintColor={isDark ? themeColors.dark.text : "#0c5b34"}
+          />
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={handleNext}
-            style={{ padding: 15 }}
-          >
-            <Image
-              source={nextIcon}
-              style={{ width: 22, height: 22 }}
-              resizeMode="contain"
-              tintColor={
-                isDark ? themeColors.dark.textLight : "#82B098"
-              }
-            />
-          </TouchableOpacity>
+        <TouchableOpacity onPress={playNext} style={{ padding: 15 }}>
+          <Image
+            source={nextIcon}
+            style={{ width: 22, height: 22 }}
+            resizeMode="contain"
+            tintColor={
+              isDark ? themeColors.dark.textLight : "#82B098"
+            }
+          />
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={handleBack}
-            style={{ padding: 15 }}
-          >
-            <Image
-              source={audiosIcon}
-              style={{ width: 22, height: 22 }}
-              resizeMode="contain"
-              tintColor={
-                isDark ? themeColors.dark.textLight : "#82B098"
-              }
-            />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ padding: 15 }}
+        >
+          <Image
+            source={audiosIcon}
+            style={{ width: 22, height: 22 }}
+            resizeMode="contain"
+            tintColor={
+              isDark ? themeColors.dark.textLight : "#82B098"
+            }
+          />
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  iconButton: {
-    width: 40,
-    height: 40,
-    justifyContent: "center",
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
+    padding: 20,
+  },
+  headerText: {
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  artworkContainer: {
+    alignItems: "center",
+    marginTop: 20,
+  },
+  artwork: {
+    width: width * 0.8,
+    height: width * 0.8,
+    borderRadius: 20,
+  },
+  detailsContainer: {
+    alignItems: "center",
+    marginTop: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: "bold",
+  },
+  reciter: {
+    fontSize: 16,
+    color: "gray",
+  },
+  favoriteIcon: {
+    width: 24,
+    height: 24,
+    marginTop: 10,
+  },
+  sliderContainer: {
+    marginTop: 20,
+    paddingHorizontal: 20,
+  },
+  timeContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  timeText: {
+    color: "gray",
+  },
+  controlsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    marginTop: 20,
+  },
+  controlIcon: {
+    width: 24,
+    height: 24,
+  },
+  playPauseIcon: {
+    width: 48,
+    height: 48,
   },
 });
 
-export default React.memo(PlayScreen);
+export default PlayScreen;
